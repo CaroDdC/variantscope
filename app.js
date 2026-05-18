@@ -9,25 +9,6 @@
 // ----------- Configuration des espèces / génomes -------------
 
 const SPECIES_CONFIG = {
-    human: {
-        label:          'Humain (Homo sapiens)',
-        ensemblSpecies: 'homo_sapiens',
-        genomes: [
-            { id: 'hg38',    label: 'hg38 / GRCh38 (récent)' },
-            { id: 'hg19',    label: 'hg19 / GRCh37' }
-        ],
-        // Génome cible pour Ensembl (doit correspondre à l'assembly Ensembl par défaut)
-        targetGenome: 'hg38'
-    },
-    mouse: {
-        label:          'Souris (Mus musculus)',
-        ensemblSpecies: 'mus_musculus',
-        genomes: [
-            { id: 'mm39',    label: 'mm39 / GRCm39 (récent)' },
-            { id: 'mm10',    label: 'mm10 / GRCm38' }
-        ],
-        targetGenome: 'mm39'
-    },
     dog: {
         label:          'Chien (Canis lupus familiaris)',
         ensemblSpecies: 'canis_lupus_familiaris',
@@ -37,7 +18,6 @@ const SPECIES_CONFIG = {
             { id: 'canFam4', label: 'canFam4 / UU_Cfam_GSD_1.0' },
             { id: 'canFam3', label: 'canFam3 / CanFam3.1' }
         ],
-        // canFam5 = ROS_Cfam_1.0 : assembly utilisé par Ensembl — toujours la cible du LiftOver
         targetGenome: 'canFam5'
     },
     cat: {
@@ -47,7 +27,6 @@ const SPECIES_CONFIG = {
             { id: 'felCat9', label: 'felCat9 / Felis_catus_9.0 (récent)' },
             { id: 'felCat8', label: 'felCat8 / Felis_catus_8.0' }
         ],
-        // felCat9 = Felis_catus_9.0 : assembly utilisé par Ensembl
         targetGenome: 'felCat9'
     },
     horse: {
@@ -57,7 +36,6 @@ const SPECIES_CONFIG = {
             { id: 'equCab3', label: 'equCab3 / EquCab3.0 (récent)' },
             { id: 'equCab2', label: 'equCab2 / EquCab2.0' }
         ],
-        // equCab3 = EquCab3.0 : assembly utilisé par Ensembl
         targetGenome: 'equCab3'
     }
 };
