@@ -54,6 +54,18 @@ const SPECIES_CONFIG = {
 let _rawSeq    = '';
 let _maskedSeq = '';
 
+// ----------- Parsing de position ---------------------------------
+
+function parsePosition(str) {
+    str = str.trim();
+    if (str.includes('_')) {
+        const parts = str.split('_').map(Number);
+        return { start: parts[0], end: parts[1] };
+    }
+    const n = Number(str);
+    return { start: n, end: n };
+}
+
 // ----------- Formulaire --------------------------------------
 
 function initForm() {
@@ -100,7 +112,7 @@ document.getElementById('variantForm').addEventListener('submit', async (e) => {
     const speciesKey = document.getElementById('species').value;
     const genomeId   = document.getElementById('genome').value;
     let   chrom      = document.getElementById('chromosome').value.trim();
-    const position   = parseInt(document.getElementById('position').value, 10);
+    const posRange   = parsePosition(document.getElementById('position').value);
     const windowSize = Math.max(50, parseInt(document.getElementById('windowSize').value, 10) || 500);
 
     const species  = SPECIES_CONFIG[speciesKey];
@@ -115,9 +127,9 @@ document.getElementById('variantForm').addEventListener('submit', async (e) => {
 
     try {
         if (genomeCfg.backend === 'ucsc') {
-            await runUCSCPipeline(species, genomeCfg, chrom, position, windowSize);
+            await runUCSCPipeline(species, genomeCfg, chrom, posRange.start, posRange.end, windowSize);
         } else {
-            await runEnsemblPipeline(species, genomeCfg, chrom, position, windowSize);
+            await runEnsemblPipeline(species, genomeCfg, chrom, posRange.start, posRange.end, windowSize);
         }
     } catch (err) {
         showError(err.message || 'Erreur inattendue.');
@@ -132,35 +144,40 @@ document.getElementById('variantForm').addEventListener('submit', async (e) => {
 //  Séquence uniquement — pas de variants (coordonnées incompatibles Ensembl)
 // =============================================================
 
-async function runUCSCPipeline(species, genomeCfg, chrom, position, windowSize) {
+async function runUCSCPipeline(species, genomeCfg, chrom, posStart, posEnd, windowSize) {
     // Normaliser "chr" (UCSC en a besoin)
     if (!/^chr/i.test(chrom)) chrom = 'chr' + chrom;
 
-    let finalDb    = genomeCfg.ucscDb;
-    let finalChrom = chrom;
-    let finalPos   = position;
+    let finalDb       = genomeCfg.ucscDb;
+    let finalChrom    = chrom;
+    let finalPosStart = posStart;
+    let finalPosEnd   = posEnd;
 
     // LiftOver UCSC si l'assemblage n'est pas déjà la cible
     if (genomeCfg.ucscDb !== genomeCfg.ucscTarget) {
         setLoadingMsg('LiftOver UCSC en cours…');
-        const lifted = await ucscLiftOver(genomeCfg.ucscDb, genomeCfg.ucscTarget, chrom, position);
-        finalDb    = genomeCfg.ucscTarget;
-        finalChrom = lifted.chrom;
-        finalPos   = lifted.position;
-        showLiftoverBanner(genomeCfg.ucscDb, genomeCfg.ucscTarget, chrom, position, finalChrom, finalPos);
+        const lifted  = await ucscLiftOver(genomeCfg.ucscDb, genomeCfg.ucscTarget, chrom, posStart);
+        finalDb       = genomeCfg.ucscTarget;
+        finalChrom    = lifted.chrom;
+        finalPosStart = lifted.position;
+        finalPosEnd   = lifted.position + (posEnd - posStart);
+        showLiftoverBanner(genomeCfg.ucscDb, genomeCfg.ucscTarget,
+                           chrom, posStart, posEnd, finalChrom, finalPosStart, finalPosEnd);
     }
 
-    // Fenêtre (UCSC : 0-based half-open)
-    const winStart0 = Math.max(0, finalPos - 1 - windowSize);
-    const winEnd0   = finalPos + windowSize;
-    const winStart1 = winStart0 + 1;   // 1-based pour affichage
-    const mutIdx    = finalPos - 1 - winStart0;
+    // Fenêtre centrée sur le milieu de l'intervalle (UCSC : 0-based half-open)
+    const midPos    = Math.round((finalPosStart + finalPosEnd) / 2);
+    const winStart0 = Math.max(0, midPos - 1 - windowSize);
+    const winEnd0   = midPos + windowSize;
+    const winStart1 = winStart0 + 1;
+    const mutIdxStart = finalPosStart - 1 - winStart0;
+    const mutIdxEnd   = finalPosEnd   - 1 - winStart0;
 
     setLoadingMsg('Récupération de la séquence UCSC…');
     const sequence = await ucscSequence(finalDb, finalChrom, winStart0, winEnd0);
 
     _rawSeq = sequence;
-    displaySequence(sequence, mutIdx, finalChrom, winStart1, winEnd0);
+    displaySequence(sequence, mutIdxStart, mutIdxEnd, finalChrom, winStart1, winEnd0);
 
     // GCF_014441545.1 = ROS_Cfam_1.0 → variants Ensembl sur les mêmes coordonnées
     if (finalDb === 'GCF_014441545.1') {
@@ -168,9 +185,9 @@ async function runUCSCPipeline(species, genomeCfg, chrom, position, windowSize) 
         const chromEns = finalChrom.replace(/^chr/i, '');
         const variants = await ensemblVariants(species.ensemblSpecies, chromEns, winStart1, winEnd0);
         displayVariants(variants);
-        const masked = buildMaskedSeq(sequence, variants, winStart1, mutIdx);
+        const masked = buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
         _maskedSeq = masked.join('');
-        displayMaskedSequence(masked, variants, mutIdx, finalChrom, winStart1, winEnd0);
+        displayMaskedSequence(masked, variants, mutIdxStart, mutIdxEnd, finalChrom, winStart1, winEnd0);
     } else {
         _maskedSeq = '';
         showVariantUnavailable(genomeCfg.id, 'ROS_Cfam_1.0');
@@ -182,32 +199,36 @@ async function runUCSCPipeline(species, genomeCfg, chrom, position, windowSize) 
 //  Séquence + variants complets
 // =============================================================
 
-async function runEnsemblPipeline(species, genomeCfg, chrom, position, windowSize) {
+async function runEnsemblPipeline(species, genomeCfg, chrom, posStart, posEnd, windowSize) {
     // Ensembl n'utilise pas le préfixe "chr"
     let chromEns = chrom.replace(/^chr/i, '');
 
-    let finalAsm   = genomeCfg.ensemblAsm;
-    let finalChrom = chromEns;
-    let finalPos   = position;
+    let finalAsm      = genomeCfg.ensemblAsm;
+    let finalChrom    = chromEns;
+    let finalPosStart = posStart;
+    let finalPosEnd   = posEnd;
 
     // LiftOver Ensembl si nécessaire
     if (genomeCfg.ensemblAsm !== species.targetEnsemblAsm) {
         setLoadingMsg('LiftOver Ensembl en cours…');
         const lifted = await ensemblLiftOver(
             species.ensemblSpecies, genomeCfg.ensemblAsm,
-            species.targetEnsemblAsm, chromEns, position
+            species.targetEnsemblAsm, chromEns, posStart
         );
-        finalAsm   = species.targetEnsemblAsm;
-        finalChrom = lifted.chrom;
-        finalPos   = lifted.position;
+        finalAsm      = species.targetEnsemblAsm;
+        finalChrom    = lifted.chrom;
+        finalPosStart = lifted.position;
+        finalPosEnd   = lifted.position + (posEnd - posStart);
         showLiftoverBanner(genomeCfg.ensemblAsm, species.targetEnsemblAsm,
-                           chromEns, position, finalChrom, finalPos);
+                           chromEns, posStart, posEnd, finalChrom, finalPosStart, finalPosEnd);
     }
 
-    // Fenêtre (Ensembl : 1-based inclusif)
-    const winStart1 = Math.max(1, finalPos - windowSize);
-    const winEnd1   = finalPos + windowSize;
-    const mutIdx    = finalPos - winStart1;
+    // Fenêtre centrée sur le milieu de l'intervalle (Ensembl : 1-based inclusif)
+    const midPos    = Math.round((finalPosStart + finalPosEnd) / 2);
+    const winStart1 = Math.max(1, midPos - windowSize);
+    const winEnd1   = midPos + windowSize;
+    const mutIdxStart = finalPosStart - winStart1;
+    const mutIdxEnd   = finalPosEnd   - winStart1;
 
     setLoadingMsg('Récupération de la séquence Ensembl…');
     const sequence = await ensemblSequence(species.ensemblSpecies, finalChrom, winStart1, winEnd1);
@@ -216,12 +237,12 @@ async function runEnsemblPipeline(species, genomeCfg, chrom, position, windowSiz
     const variants = await ensemblVariants(species.ensemblSpecies, finalChrom, winStart1, winEnd1);
 
     _rawSeq = sequence;
-    displaySequence(sequence, mutIdx, finalChrom, winStart1, winEnd1);
+    displaySequence(sequence, mutIdxStart, mutIdxEnd, finalChrom, winStart1, winEnd1);
     displayVariants(variants);
 
-    const masked = buildMaskedSeq(sequence, variants, winStart1);
+    const masked = buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
     _maskedSeq = masked.join('');
-    displayMaskedSequence(masked, variants, mutIdx, finalChrom, winStart1, winEnd1);
+    displayMaskedSequence(masked, variants, mutIdxStart, mutIdxEnd, finalChrom, winStart1, winEnd1);
 }
 
 // =============================================================
@@ -325,40 +346,46 @@ async function ensemblVariants(ensemblSpecies, chrom, start1, end1) {
 //  Séquence masquée
 // =============================================================
 
-function buildMaskedSeq(seq, variants, regionStart1, mutIdx) {
+function buildMaskedSeq(seq, variants, regionStart1, mutIdxStart, mutIdxEnd) {
     // Retourne un tableau de tokens :
-    //   - position ciblée (mutIdx) : [ref/var] si un variant Ensembl s'y trouve
-    //   - autres variants           : N
-    //   - reste                     : base originale
+    //   - position(s) ciblée(s) : [ref/var] (position unique) ou bases surlignées (intervalle)
+    //   - autres variants       : N
+    //   - reste                 : base originale
     const tokens = seq.split('');
 
-    // 1. Trouver le label allélique pour la position ciblée
+    // 1. Pour une position unique : chercher le label allélique dans Ensembl
     let mutLabel = null;
-    for (const v of variants) {
-        const i0 = v.start - regionStart1;
-        const i1 = (v.end !== undefined ? v.end : v.start) - regionStart1;
-        if (mutIdx >= i0 && mutIdx <= i1) {
-            const alleles = Array.isArray(v.alleles) ? v.alleles :
-                            (typeof v.alleles === 'string' ? v.alleles.split('/') : []);
-            if (alleles.length > 0) {
-                mutLabel = '[' + alleles.join('/') + ']';
-                break;
+    if (mutIdxStart === mutIdxEnd) {
+        for (const v of variants) {
+            const i0 = v.start - regionStart1;
+            const i1 = (v.end !== undefined ? v.end : v.start) - regionStart1;
+            if (mutIdxStart >= i0 && mutIdxStart <= i1) {
+                const alleles = Array.isArray(v.alleles) ? v.alleles :
+                                (typeof v.alleles === 'string' ? v.alleles.split('/') : []);
+                if (alleles.length > 0) {
+                    mutLabel = '[' + alleles.join('/') + ']';
+                    break;
+                }
             }
         }
     }
 
-    // 2. Masquer les variants (sauf la position ciblée, gérée après)
+    // 2. Masquer les variants hors de l'intervalle ciblé
     variants.forEach(v => {
         const i0 = v.start - regionStart1;
         const i1 = (v.end !== undefined ? v.end : v.start) - regionStart1;
         for (let i = i0; i <= i1; i++) {
-            if (i < 0 || i >= tokens.length || i === mutIdx) continue;
+            if (i < 0 || i >= tokens.length) continue;
+            if (i >= mutIdxStart && i <= mutIdxEnd) continue;
             tokens[i] = 'N';
         }
     });
 
-    // 3. Toujours annoter la position ciblée
-    tokens[mutIdx] = mutLabel || '[' + seq[mutIdx] + '/?]';
+    // 3. Annoter la/les position(s) ciblée(s)
+    if (mutIdxStart === mutIdxEnd) {
+        tokens[mutIdxStart] = mutLabel || '[' + seq[mutIdxStart] + '/?]';
+    }
+    // Pour un intervalle, les bases originales sont conservées et surlignées via hMap
 
     return tokens;
 }
@@ -367,11 +394,12 @@ function buildMaskedSeq(seq, variants, regionStart1, mutIdx) {
 //  Affichage
 // =============================================================
 
-function displaySequence(seq, mutIdx, chrom, start1, end1) {
+function displaySequence(seq, mutIdxStart, mutIdxEnd, chrom, start1, end1) {
     document.getElementById('coordsDisplay').textContent =
         `${chrom}:${fmt(start1)}–${fmt(end1)}  ·  ${seq.length} pb`;
-    document.getElementById('sequenceDisplay').innerHTML =
-        renderSeq(seq, new Map([[mutIdx, 'pos']]));
+    const hMap = new Map();
+    for (let i = mutIdxStart; i <= mutIdxEnd; i++) hMap.set(i, 'pos');
+    document.getElementById('sequenceDisplay').innerHTML = renderSeq(seq, hMap);
     showEl('sequenceCard');
 }
 
@@ -424,7 +452,7 @@ function showVariantUnavailable(fromAsm, targetAsm) {
     showEl('variantsCard');
 }
 
-function displayMaskedSequence(tokens, variants, mutIdx, chrom, start1, end1) {
+function displayMaskedSequence(tokens, variants, mutIdxStart, mutIdxEnd, chrom, start1, end1) {
     document.getElementById('maskedCoordsDisplay').textContent =
         `${chrom}:${fmt(start1)}–${fmt(end1)}  ·  ${variants.length} polymorphisme(s) annoté(s)`;
 
@@ -432,7 +460,7 @@ function displayMaskedSequence(tokens, variants, mutIdx, chrom, start1, end1) {
     for (let i = 0; i < tokens.length; i++) {
         if (tokens[i] === 'N') hMap.set(i, 'n');
     }
-    hMap.set(mutIdx, 'pos');  // priorité sur N éventuel à cette position
+    for (let i = mutIdxStart; i <= mutIdxEnd; i++) hMap.set(i, 'pos');
 
     document.getElementById('maskedDisplay').innerHTML = renderTokenSeq(tokens, hMap);
     showEl('maskedCard');
@@ -523,10 +551,15 @@ function setLoadingMsg(msg) {
     if (el) el.textContent = msg;
 }
 
-function showLiftoverBanner(fromAsm, toAsm, fromChrom, fromPos, toChrom, toPos) {
+function showLiftoverBanner(fromAsm, toAsm, fromChrom, fromStart, fromEnd, toChrom, toStart, toEnd) {
+    const fromCoord = fromStart === fromEnd
+        ? `${fromChrom}:${fmt(fromStart)}`
+        : `${fromChrom}:${fmt(fromStart)}–${fmt(fromEnd)}`;
+    const toCoord = toStart === toEnd
+        ? `${toChrom}:${fmt(toStart)}`
+        : `${toChrom}:${fmt(toStart)}–${fmt(toEnd)}`;
     const el = document.getElementById('liftoverInfo');
-    el.innerHTML = `<strong>LiftOver effectué :</strong> ` +
-        `${fromAsm} ${fromChrom}:${fmt(fromPos)} → ${toAsm} ${toChrom}:${fmt(toPos)}`;
+    el.innerHTML = `<strong>LiftOver effectué :</strong> ${fromAsm} ${fromCoord} → ${toAsm} ${toCoord}`;
     showEl('liftoverInfo');
 }
 
