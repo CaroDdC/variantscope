@@ -239,8 +239,13 @@ async function runEnsemblPipeline(species, genomeCfg, chrom, posStart, posEnd, w
 // =============================================================
 
 async function ucscLiftOver(fromDb, toDb, chrom, position) {
-    // UCSC : coordonnées 0-based half-open pour une seule base
-    // Appel via proxy Netlify pour éviter les restrictions CORS
+    // Vérifier le cache localStorage avant d'appeler Netlify
+    const cacheKey = `lo:${fromDb}:${toDb}:${chrom}:${position}`;
+    try {
+        const hit = localStorage.getItem(cacheKey);
+        if (hit) return JSON.parse(hit);
+    } catch {}
+
     const start = position - 1;
     const end   = position;
     const url = `/.netlify/functions/liftover` +
@@ -260,10 +265,11 @@ async function ucscLiftOver(fromDb, toDb, chrom, position) {
     }
 
     const m = data.mappedCoordinates[0];
-    return {
-        chrom:    m.chrom,
-        position: m.start + 1   // 0-based → 1-based
-    };
+    const result = { chrom: m.chrom, position: m.start + 1 };
+
+    try { localStorage.setItem(cacheKey, JSON.stringify(result)); } catch {}
+
+    return result;
 }
 
 async function ucscSequence(db, chrom, start0, end0) {
