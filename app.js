@@ -1,77 +1,98 @@
 // =============================================================
 //  VariantScope — app.js
-//  API utilisée : Ensembl REST API uniquement (supporte CORS)
-//    - /map/{species}/{asm1}/{region}/{asm2} → LiftOver
-//    - /sequence/region/{species}/{region}   → Séquence
-//    - /overlap/region/{species}/{region}    → Variants
+//  Deux backends selon l'assemblage :
+//    • UCSC  : liftover + séquence  (canFam3/4/6 chien)
+//    • Ensembl : liftover + séquence + variants  (tous les autres)
 // =============================================================
 
-// ----------- Configuration des espèces / génomes -------------
-// ensemblAsm : nom de l'assemblage tel qu'Ensembl le connaît
-// targetEnsemblAsm : assemblage cible (celui indexé par Ensembl pour les variants)
+// ----------- Configuration -----------------------------------
 
 const SPECIES_CONFIG = {
     dog: {
-        label:            'Chien (Canis lupus familiaris)',
-        ensemblSpecies:   'canis_lupus_familiaris',
+        label:          'Chien (Canis lupus familiaris)',
+        ensemblSpecies: 'canis_lupus_familiaris',
         genomes: [
-            { id: 'ROS_Cfam_1.0', label: 'ROS_Cfam_1.0 / canFam5 (cible Ensembl)', ensemblAsm: 'ROS_Cfam_1.0' },
-            { id: 'CanFam3.1',    label: 'CanFam3.1 / canFam3',                      ensemblAsm: 'CanFam3.1'    }
+            // Ensembl → pipeline complet (séquence + variants)
+            { id: 'ROS_Cfam_1.0', label: 'ROS_Cfam_1.0 / Labrador SID07034 2020 (Ensembl — variants disponibles)',
+              backend: 'ensembl', ensemblAsm: 'ROS_Cfam_1.0' },
+            // UCSC → liftover vers GCF_014441545.1 (= ROS_Cfam_1.0) → variants Ensembl disponibles
+            { id: 'canFam6', label: 'canFam6 / Dog10K_Boxer_Tasha',
+              backend: 'ucsc', ucscDb: 'canFam6', ucscTarget: 'GCF_014441545.1' },
+            { id: 'canFam5', label: 'canFam5 / UMICH_Zoey_3.1',
+              backend: 'ucsc', ucscDb: 'canFam5', ucscTarget: 'GCF_014441545.1' },
+            { id: 'canFam4', label: 'canFam4 / UU_Cfam_GSD_1.0',
+              backend: 'ucsc', ucscDb: 'canFam4', ucscTarget: 'GCF_014441545.1' },
+            { id: 'canFam3', label: 'canFam3 / CanFam3.1',
+              backend: 'ucsc', ucscDb: 'canFam3', ucscTarget: 'GCF_014441545.1' }
         ],
         targetEnsemblAsm: 'ROS_Cfam_1.0'
     },
     cat: {
-        label:            'Chat (Felis catus)',
-        ensemblSpecies:   'felis_catus',
+        label:          'Chat (Felis catus)',
+        ensemblSpecies: 'felis_catus',
         genomes: [
-            { id: 'Felis_catus_9.0', label: 'Felis_catus_9.0 / felCat9 (récent)', ensemblAsm: 'Felis_catus_9.0' },
-            { id: 'Felis_catus_8.0', label: 'Felis_catus_8.0 / felCat8',          ensemblAsm: 'Felis_catus_8.0' }
+            { id: 'Felis_catus_9.0', label: 'Felis_catus_9.0 / felCat9 (récent)',
+              backend: 'ensembl', ensemblAsm: 'Felis_catus_9.0' },
+            { id: 'Felis_catus_8.0', label: 'Felis_catus_8.0 / felCat8',
+              backend: 'ensembl', ensemblAsm: 'Felis_catus_8.0' }
         ],
         targetEnsemblAsm: 'Felis_catus_9.0'
     },
     horse: {
-        label:            'Cheval (Equus caballus)',
-        ensemblSpecies:   'equus_caballus',
+        label:          'Cheval (Equus caballus)',
+        ensemblSpecies: 'equus_caballus',
         genomes: [
-            { id: 'EquCab3.0', label: 'EquCab3.0 / equCab3 (récent)', ensemblAsm: 'EquCab3.0' },
-            { id: 'EquCab2.0', label: 'EquCab2.0 / equCab2',          ensemblAsm: 'EquCab2.0' }
+            { id: 'EquCab3.0', label: 'EquCab3.0 / equCab3 (récent)',
+              backend: 'ensembl', ensemblAsm: 'EquCab3.0' },
+            { id: 'EquCab2.0', label: 'EquCab2.0 / equCab2',
+              backend: 'ensembl', ensemblAsm: 'EquCab2.0' }
         ],
         targetEnsemblAsm: 'EquCab3.0'
     }
 };
 
-// Séquences stockées pour le bouton "Copier"
 let _rawSeq    = '';
 let _maskedSeq = '';
 
-// ----------- Initialisation du formulaire --------------------
+// ----------- Formulaire --------------------------------------
 
 function initForm() {
-    const speciesSel = document.getElementById('species');
+    const sel = document.getElementById('species');
     Object.entries(SPECIES_CONFIG).forEach(([key, cfg]) => {
         const opt = document.createElement('option');
         opt.value = key;
         opt.textContent = cfg.label;
-        speciesSel.appendChild(opt);
+        sel.appendChild(opt);
     });
     refreshGenomeOptions();
+    updateLiftoverNote();
 }
 
 function refreshGenomeOptions() {
     const key = document.getElementById('species').value;
-    const genomeSel = document.getElementById('genome');
-    genomeSel.innerHTML = '';
+    const sel = document.getElementById('genome');
+    sel.innerHTML = '';
     SPECIES_CONFIG[key].genomes.forEach(g => {
         const opt = document.createElement('option');
         opt.value = g.id;
         opt.textContent = g.label;
-        genomeSel.appendChild(opt);
+        sel.appendChild(opt);
     });
 }
 
-document.getElementById('species').addEventListener('change', refreshGenomeOptions);
+function updateLiftoverNote() {
+    const speciesKey = document.getElementById('species').value;
+    // Note visible uniquement pour le chien (plusieurs backends)
+    const show = speciesKey === 'dog';
+    document.getElementById('liftoverNote').classList.toggle('hidden', !show);
+}
 
-// ----------- Soumission du formulaire ------------------------
+document.getElementById('species').addEventListener('change', () => {
+    refreshGenomeOptions();
+    updateLiftoverNote();
+});
+
+// ----------- Soumission --------------------------------------
 
 document.getElementById('variantForm').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -82,8 +103,8 @@ document.getElementById('variantForm').addEventListener('submit', async (e) => {
     const position   = parseInt(document.getElementById('position').value, 10);
     const windowSize = Math.max(50, parseInt(document.getElementById('windowSize').value, 10) || 500);
 
-    // Ensembl n'utilise pas le préfixe "chr"
-    const chromEns = chrom.replace(/^chr/i, '');
+    const species  = SPECIES_CONFIG[speciesKey];
+    const genomeCfg = species.genomes.find(g => g.id === genomeId);
 
     const btn = document.getElementById('submitBtn');
     btn.disabled = true;
@@ -93,66 +114,171 @@ document.getElementById('variantForm').addEventListener('submit', async (e) => {
     hideEl('errorBox');
 
     try {
-        const species = SPECIES_CONFIG[speciesKey];
-
-        let finalAsm   = genomeId;
-        let finalChrom = chromEns;
-        let finalPos   = position;
-
-        // --- Étape 1 : LiftOver via Ensembl (si assemblage ≠ cible) ---
-        if (genomeId !== species.targetEnsemblAsm) {
-            setLoadingMsg('LiftOver en cours (Ensembl)…');
-            const lifted = await doLiftOver(
-                species.ensemblSpecies,
-                genomeId,
-                species.targetEnsemblAsm,
-                chromEns,
-                position
-            );
-            finalAsm   = species.targetEnsemblAsm;
-            finalChrom = lifted.chrom;
-            finalPos   = lifted.position;
-            showLiftoverBanner(genomeId, species.targetEnsemblAsm, chromEns, position, finalChrom, finalPos);
+        if (genomeCfg.backend === 'ucsc') {
+            await runUCSCPipeline(species, genomeCfg, chrom, position, windowSize);
+        } else {
+            await runEnsemblPipeline(species, genomeCfg, chrom, position, windowSize);
         }
-
-        // --- Étape 2 : Coordonnées de la fenêtre (1-based, Ensembl) ---
-        const winStart1 = Math.max(1, finalPos - windowSize);
-        const winEnd1   = finalPos + windowSize;
-
-        // --- Étape 3 : Séquence ---
-        setLoadingMsg('Récupération de la séquence (Ensembl)…');
-        const sequence = await fetchSequence(species.ensemblSpecies, finalChrom, winStart1, winEnd1);
-
-        // --- Étape 4 : Variants ---
-        setLoadingMsg('Récupération des variants (Ensembl)…');
-        const variants = await fetchVariants(species.ensemblSpecies, finalChrom, winStart1, winEnd1);
-
-        // Index 0-based de la position dans la séquence
-        const mutIdx = finalPos - winStart1;
-
-        // --- Étape 5 : Affichage ---
-        _rawSeq = sequence;
-        displaySequence(sequence, mutIdx, finalChrom, winStart1, winEnd1);
-        displayVariants(variants);
-
-        const masked = buildMaskedSeq(sequence, variants, winStart1);
-        _maskedSeq = masked;
-        displayMaskedSequence(masked, variants, mutIdx, finalChrom, winStart1, winEnd1);
-
     } catch (err) {
-        showError(err.message || 'Erreur inattendue. Vérifiez vos paramètres.');
+        showError(err.message || 'Erreur inattendue.');
     } finally {
         hideEl('loading');
         btn.disabled = false;
     }
 });
 
-// ----------- Appels API Ensembl (CORS OK) --------------------
+// =============================================================
+//  Pipeline UCSC (canFam3 / canFam4 / canFam6)
+//  Séquence uniquement — pas de variants (coordonnées incompatibles Ensembl)
+// =============================================================
 
-const ENSEMBL_HEADERS = { 'Accept': 'application/json' };
+async function runUCSCPipeline(species, genomeCfg, chrom, position, windowSize) {
+    // Normaliser "chr" (UCSC en a besoin)
+    if (!/^chr/i.test(chrom)) chrom = 'chr' + chrom;
+
+    let finalDb    = genomeCfg.ucscDb;
+    let finalChrom = chrom;
+    let finalPos   = position;
+
+    // LiftOver UCSC si l'assemblage n'est pas déjà la cible
+    if (genomeCfg.ucscDb !== genomeCfg.ucscTarget) {
+        setLoadingMsg('LiftOver UCSC en cours…');
+        const lifted = await ucscLiftOver(genomeCfg.ucscDb, genomeCfg.ucscTarget, chrom, position);
+        finalDb    = genomeCfg.ucscTarget;
+        finalChrom = lifted.chrom;
+        finalPos   = lifted.position;
+        showLiftoverBanner(genomeCfg.ucscDb, genomeCfg.ucscTarget, chrom, position, finalChrom, finalPos);
+    }
+
+    // Fenêtre (UCSC : 0-based half-open)
+    const winStart0 = Math.max(0, finalPos - 1 - windowSize);
+    const winEnd0   = finalPos + windowSize;
+    const winStart1 = winStart0 + 1;   // 1-based pour affichage
+    const mutIdx    = finalPos - 1 - winStart0;
+
+    setLoadingMsg('Récupération de la séquence UCSC…');
+    const sequence = await ucscSequence(finalDb, finalChrom, winStart0, winEnd0);
+
+    _rawSeq = sequence;
+    displaySequence(sequence, mutIdx, finalChrom, winStart1, winEnd0);
+
+    // GCF_014441545.1 = ROS_Cfam_1.0 → variants Ensembl sur les mêmes coordonnées
+    if (finalDb === 'GCF_014441545.1') {
+        setLoadingMsg('Récupération des variants Ensembl…');
+        const chromEns = finalChrom.replace(/^chr/i, '');
+        const variants = await ensemblVariants(species.ensemblSpecies, chromEns, winStart1, winEnd0);
+        displayVariants(variants);
+        const masked = buildMaskedSeq(sequence, variants, winStart1);
+        _maskedSeq = masked;
+        displayMaskedSequence(masked, variants, mutIdx, finalChrom, winStart1, winEnd0);
+    } else {
+        _maskedSeq = '';
+        showVariantUnavailable(genomeCfg.id, 'ROS_Cfam_1.0');
+    }
+}
+
+// =============================================================
+//  Pipeline Ensembl (chat, cheval, chien en ROS_Cfam_1.0)
+//  Séquence + variants complets
+// =============================================================
+
+async function runEnsemblPipeline(species, genomeCfg, chrom, position, windowSize) {
+    // Ensembl n'utilise pas le préfixe "chr"
+    let chromEns = chrom.replace(/^chr/i, '');
+
+    let finalAsm   = genomeCfg.ensemblAsm;
+    let finalChrom = chromEns;
+    let finalPos   = position;
+
+    // LiftOver Ensembl si nécessaire
+    if (genomeCfg.ensemblAsm !== species.targetEnsemblAsm) {
+        setLoadingMsg('LiftOver Ensembl en cours…');
+        const lifted = await ensemblLiftOver(
+            species.ensemblSpecies, genomeCfg.ensemblAsm,
+            species.targetEnsemblAsm, chromEns, position
+        );
+        finalAsm   = species.targetEnsemblAsm;
+        finalChrom = lifted.chrom;
+        finalPos   = lifted.position;
+        showLiftoverBanner(genomeCfg.ensemblAsm, species.targetEnsemblAsm,
+                           chromEns, position, finalChrom, finalPos);
+    }
+
+    // Fenêtre (Ensembl : 1-based inclusif)
+    const winStart1 = Math.max(1, finalPos - windowSize);
+    const winEnd1   = finalPos + windowSize;
+    const mutIdx    = finalPos - winStart1;
+
+    setLoadingMsg('Récupération de la séquence Ensembl…');
+    const sequence = await ensemblSequence(species.ensemblSpecies, finalChrom, winStart1, winEnd1);
+
+    setLoadingMsg('Récupération des variants Ensembl…');
+    const variants = await ensemblVariants(species.ensemblSpecies, finalChrom, winStart1, winEnd1);
+
+    _rawSeq = sequence;
+    displaySequence(sequence, mutIdx, finalChrom, winStart1, winEnd1);
+    displayVariants(variants);
+
+    const masked = buildMaskedSeq(sequence, variants, winStart1);
+    _maskedSeq = masked;
+    displayMaskedSequence(masked, variants, mutIdx, finalChrom, winStart1, winEnd1);
+}
+
+// =============================================================
+//  Fonctions API UCSC
+// =============================================================
+
+async function ucscLiftOver(fromDb, toDb, chrom, position) {
+    // UCSC : coordonnées 0-based half-open pour une seule base
+    const start = position - 1;
+    const end   = position;
+    const url = `https://api.genome.ucsc.edu/liftover` +
+                `?fromDb=${fromDb}&toDb=${toDb}` +
+                `&chrom=${encodeURIComponent(chrom)}&start=${start}&end=${end}`;
+
+    const resp = await fetch(url);
+    if (!resp.ok) {
+        let detail = '';
+        try { const d = await resp.json(); detail = d.error || ''; } catch {}
+        throw new Error(`LiftOver UCSC ${fromDb}→${toDb} : HTTP ${resp.status}${detail ? ' — ' + detail : ''}`);
+    }
+    const data = await resp.json();
+    if (data.error) throw new Error('LiftOver UCSC : ' + data.error);
+    if (!data.mappedCoordinates || data.mappedCoordinates.length === 0) {
+        throw new Error(`LiftOver UCSC : aucune correspondance pour ${chrom}:${position} (${fromDb}→${toDb}).`);
+    }
+
+    const m = data.mappedCoordinates[0];
+    return {
+        chrom:    m.chrom,
+        position: m.start + 1   // 0-based → 1-based
+    };
+}
+
+async function ucscSequence(db, chrom, start0, end0) {
+    // UCSC : 0-based half-open
+    const url = `https://api.genome.ucsc.edu/getData/sequence` +
+                `?genome=${db}&chrom=${encodeURIComponent(chrom)}&start=${start0}&end=${end0}`;
+
+    const resp = await fetch(url);
+    if (!resp.ok) {
+        let detail = '';
+        try { const d = await resp.json(); detail = d.error || ''; } catch {}
+        throw new Error(`Séquence UCSC : HTTP ${resp.status}${detail ? ' — ' + detail : ''}`);
+    }
+    const data = await resp.json();
+    if (data.error) throw new Error('Séquence UCSC : ' + data.error);
+    return data.dna.toUpperCase();
+}
+
+// =============================================================
+//  Fonctions API Ensembl
+// =============================================================
+
+const ENS_HEADERS = { 'Accept': 'application/json' };
 
 async function ensemblFetch(url) {
-    const resp = await fetch(url, { headers: ENSEMBL_HEADERS });
+    const resp = await fetch(url, { headers: ENS_HEADERS });
     if (!resp.ok) {
         let detail = '';
         try { const e = await resp.json(); detail = e.error || e.message || ''; } catch {}
@@ -161,38 +287,29 @@ async function ensemblFetch(url) {
     return resp.json();
 }
 
-async function doLiftOver(ensemblSpecies, fromAsm, toAsm, chrom, position) {
-    // GET /map/:species/:asm_one/:region/:asm_two  (coordonnées 1-based)
+async function ensemblLiftOver(ensemblSpecies, fromAsm, toAsm, chrom, position) {
     const url = `https://rest.ensembl.org/map/${ensemblSpecies}` +
                 `/${fromAsm}/${chrom}:${position}..${position}/${toAsm}`;
-
     const data = await ensemblFetch(url);
 
     if (!data.mappings || data.mappings.length === 0) {
-        throw new Error(
-            `LiftOver ${fromAsm} → ${toAsm} : aucune correspondance pour ${chrom}:${position}.\n` +
-            `Essayez de saisir vos coordonnées directement en ${toAsm}.`
-        );
+        throw new Error(`LiftOver ${fromAsm}→${toAsm} : aucune correspondance pour ${chrom}:${position}.`);
     }
-
     const m = data.mappings[0].mapped;
     return { chrom: m.seq_region_name, position: m.start };
 }
 
-async function fetchSequence(ensemblSpecies, chrom, start1, end1) {
-    // GET /sequence/region/:species/:region  (coordonnées 1-based inclusives)
+async function ensemblSequence(ensemblSpecies, chrom, start1, end1) {
     const url = `https://rest.ensembl.org/sequence/region/${ensemblSpecies}` +
                 `/${chrom}:${start1}..${end1}?type=genomic`;
-
     const data = await ensemblFetch(url);
     return data.seq.toUpperCase();
 }
 
-async function fetchVariants(ensemblSpecies, chrom, start1, end1) {
+async function ensemblVariants(ensemblSpecies, chrom, start1, end1) {
     const url = `https://rest.ensembl.org/overlap/region/${ensemblSpecies}` +
                 `/${chrom}:${start1}-${end1}?feature=variation`;
-
-    const resp = await fetch(url, { headers: ENSEMBL_HEADERS });
+    const resp = await fetch(url, { headers: ENS_HEADERS });
     if (resp.status === 404) return [];
     if (!resp.ok) {
         let detail = '';
@@ -203,21 +320,25 @@ async function fetchVariants(ensemblSpecies, chrom, start1, end1) {
     return Array.isArray(data) ? data : [];
 }
 
-// ----------- Construction de la séquence masquée -------------
+// =============================================================
+//  Séquence masquée
+// =============================================================
 
 function buildMaskedSeq(seq, variants, regionStart1) {
     const bases = seq.split('');
     variants.forEach(v => {
-        const idxStart = v.start - regionStart1;
-        const idxEnd   = (v.end !== undefined ? v.end : v.start) - regionStart1;
-        for (let i = idxStart; i <= idxEnd; i++) {
+        const i0 = v.start - regionStart1;
+        const i1 = (v.end !== undefined ? v.end : v.start) - regionStart1;
+        for (let i = i0; i <= i1; i++) {
             if (i >= 0 && i < bases.length) bases[i] = 'N';
         }
     });
     return bases.join('');
 }
 
-// ----------- Affichage des résultats -------------------------
+// =============================================================
+//  Affichage
+// =============================================================
 
 function displaySequence(seq, mutIdx, chrom, start1, end1) {
     document.getElementById('coordsDisplay').textContent =
@@ -236,10 +357,10 @@ function displayVariants(variants) {
         tableEl.innerHTML = '<p class="no-data">Aucun polymorphisme référencé dans cette région.</p>';
     } else {
         const rows = variants.slice(0, 500).map(v => {
-            const name   = v.id || v.variation_name || '–';
-            const link   = /^rs\d+/.test(name)
-                           ? `<a href="https://www.ensembl.org/id/${name}" target="_blank" rel="noopener">${name}</a>`
-                           : name;
+            const name    = v.id || v.variation_name || '–';
+            const link    = /^rs\d+/.test(name)
+                            ? `<a href="https://www.ensembl.org/id/${name}" target="_blank" rel="noopener">${name}</a>`
+                            : name;
             const alleles = Array.isArray(v.alleles) ? v.alleles.join('/') :
                             (typeof v.alleles === 'string' ? v.alleles : '–');
             const conseq  = Array.isArray(v.consequence_type) ? v.consequence_type[0]
@@ -267,6 +388,15 @@ function displayVariants(variants) {
     showEl('variantsCard');
 }
 
+function showVariantUnavailable(fromAsm, targetAsm) {
+    document.getElementById('variantCount').textContent = 'Variants non disponibles';
+    document.getElementById('variantTable').innerHTML =
+        `<p class="no-data">Les variants Ensembl sont indexés en <strong>${targetAsm}</strong>. ` +
+        `Avec l'assemblage <strong>${fromAsm}</strong>, les positions seraient incorrectes — ` +
+        `ils ne sont donc pas affichés. Pour les variants, sélectionnez <strong>${targetAsm}</strong>.</p>`;
+    showEl('variantsCard');
+}
+
 function displayMaskedSequence(masked, variants, mutIdx, chrom, start1, end1) {
     document.getElementById('maskedCoordsDisplay').textContent =
         `${chrom}:${fmt(start1)}–${fmt(end1)}  ·  ${variants.length} position(s) masquée(s)`;
@@ -281,34 +411,31 @@ function displayMaskedSequence(masked, variants, mutIdx, chrom, start1, end1) {
     showEl('maskedCard');
 }
 
-// ----------- Rendu HTML d'une séquence -----------------------
+// =============================================================
+//  Rendu séquence
+// =============================================================
 
 function renderSeq(seq, highlightMap) {
-    const LINE  = 60;
-    const BLOCK = 10;
+    const LINE = 60, BLOCK = 10;
     let html = '<div class="seq-display">';
-
     for (let ls = 0; ls < seq.length; ls += LINE) {
         const le = Math.min(ls + LINE, seq.length);
-        html += `<div class="seq-line">`;
-        html += `<span class="seq-coord">${ls + 1}</span>`;
-        html += `<span class="seq-bases">`;
-
+        html += `<div class="seq-line"><span class="seq-coord">${ls + 1}</span><span class="seq-bases">`;
         for (let i = ls; i < le; i++) {
             if (i > ls && (i - ls) % BLOCK === 0) html += ' ';
-            const base = seq[i];
             const type = highlightMap.get(i);
-            if      (type === 'pos') html += `<span class="highlight-pos">${base}</span>`;
+            if      (type === 'pos') html += `<span class="highlight-pos">${seq[i]}</span>`;
             else if (type === 'n')   html += `<span class="highlight-n">N</span>`;
-            else                     html += base;
+            else                     html += seq[i];
         }
-
-        html += `</span></div>`;
+        html += '</span></div>';
     }
     return html + '</div>';
 }
 
-// ----------- Copie dans le presse-papiers -------------------
+// =============================================================
+//  Copie
+// =============================================================
 
 function copySeq(which) {
     const seq = which === 'raw' ? _rawSeq : _maskedSeq;
@@ -320,12 +447,12 @@ function copySeq(which) {
                 setTimeout(() => { btn.textContent = 'Copier'; }, 1500);
             }
         });
-    }).catch(() => {
-        alert('Copie automatique bloquée. Sélectionnez la séquence manuellement.');
-    });
+    }).catch(() => alert('Copie automatique bloquée. Sélectionnez manuellement.'));
 }
 
-// ----------- Helpers interface -------------------------------
+// =============================================================
+//  Helpers UI
+// =============================================================
 
 function showEl(id) { document.getElementById(id)?.classList.remove('hidden'); }
 function hideEl(id) { document.getElementById(id)?.classList.add('hidden'); }
@@ -348,8 +475,7 @@ function setLoadingMsg(msg) {
 
 function showLiftoverBanner(fromAsm, toAsm, fromChrom, fromPos, toChrom, toPos) {
     const el = document.getElementById('liftoverInfo');
-    el.innerHTML =
-        `<strong>LiftOver effectué :</strong> ` +
+    el.innerHTML = `<strong>LiftOver effectué :</strong> ` +
         `${fromAsm} ${fromChrom}:${fmt(fromPos)} → ${toAsm} ${toChrom}:${fmt(toPos)}`;
     showEl('liftoverInfo');
 }
@@ -358,5 +484,7 @@ function fmt(n) {
     return typeof n === 'number' ? n.toLocaleString('fr-FR') : n;
 }
 
-// ----------- Démarrage --------------------------------------
+// =============================================================
+//  Démarrage
+// =============================================================
 initForm();
