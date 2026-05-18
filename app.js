@@ -168,8 +168,8 @@ async function runUCSCPipeline(species, genomeCfg, chrom, position, windowSize) 
         const chromEns = finalChrom.replace(/^chr/i, '');
         const variants = await ensemblVariants(species.ensemblSpecies, chromEns, winStart1, winEnd0);
         displayVariants(variants);
-        const masked = buildMaskedSeq(sequence, variants, winStart1);
-        _maskedSeq = masked;
+        const masked = buildMaskedSeq(sequence, variants, winStart1, mutIdx);
+        _maskedSeq = masked.join('');
         displayMaskedSequence(masked, variants, mutIdx, finalChrom, winStart1, winEnd0);
     } else {
         _maskedSeq = '';
@@ -220,7 +220,7 @@ async function runEnsemblPipeline(species, genomeCfg, chrom, position, windowSiz
     displayVariants(variants);
 
     const masked = buildMaskedSeq(sequence, variants, winStart1);
-    _maskedSeq = masked;
+    _maskedSeq = masked.join('');
     displayMaskedSequence(masked, variants, mutIdx, finalChrom, winStart1, winEnd1);
 }
 
@@ -325,16 +325,44 @@ async function ensemblVariants(ensemblSpecies, chrom, start1, end1) {
 //  Séquence masquée
 // =============================================================
 
-function buildMaskedSeq(seq, variants, regionStart1) {
-    const bases = seq.split('');
+function buildMaskedSeq(seq, variants, regionStart1, mutIdx) {
+    // Retourne un tableau de tokens :
+    //   - position ciblée (mutIdx) : [ref/var] si un variant Ensembl s'y trouve
+    //   - autres variants           : N
+    //   - reste                     : base originale
+    const tokens = seq.split('');
+
+    // 1. Trouver le label allélique pour la position ciblée
+    let mutLabel = null;
+    for (const v of variants) {
+        const i0 = v.start - regionStart1;
+        const i1 = (v.end !== undefined ? v.end : v.start) - regionStart1;
+        if (mutIdx >= i0 && mutIdx <= i1) {
+            const alleles = Array.isArray(v.alleles) ? v.alleles :
+                            (typeof v.alleles === 'string' ? v.alleles.split('/') : []);
+            if (alleles.length > 0) {
+                mutLabel = '[' + alleles.join('/') + ']';
+                break;
+            }
+        }
+    }
+
+    // 2. Appliquer le masquage
     variants.forEach(v => {
         const i0 = v.start - regionStart1;
         const i1 = (v.end !== undefined ? v.end : v.start) - regionStart1;
         for (let i = i0; i <= i1; i++) {
-            if (i >= 0 && i < bases.length) bases[i] = 'N';
+            if (i < 0 || i >= tokens.length) continue;
+            if (i === mutIdx) {
+                if (mutLabel) tokens[i] = mutLabel;  // [ref/var] sur la position ciblée
+                // sinon on laisse la base de référence
+            } else {
+                tokens[i] = 'N';
+            }
         }
     });
-    return bases.join('');
+
+    return tokens;
 }
 
 // =============================================================
@@ -398,18 +426,41 @@ function showVariantUnavailable(fromAsm, targetAsm) {
     showEl('variantsCard');
 }
 
-function displayMaskedSequence(masked, variants, mutIdx, chrom, start1, end1) {
+function displayMaskedSequence(tokens, variants, mutIdx, chrom, start1, end1) {
     document.getElementById('maskedCoordsDisplay').textContent =
-        `${chrom}:${fmt(start1)}–${fmt(end1)}  ·  ${variants.length} position(s) masquée(s)`;
+        `${chrom}:${fmt(start1)}–${fmt(end1)}  ·  ${variants.length} polymorphisme(s) annoté(s)`;
 
     const hMap = new Map();
-    for (let i = 0; i < masked.length; i++) {
-        if (masked[i] === 'N') hMap.set(i, 'n');
+    for (let i = 0; i < tokens.length; i++) {
+        if (tokens[i] === 'N') hMap.set(i, 'n');
     }
-    hMap.set(mutIdx, 'pos');
+    hMap.set(mutIdx, 'pos');  // priorité sur N éventuel à cette position
 
-    document.getElementById('maskedDisplay').innerHTML = renderSeq(masked, hMap);
+    document.getElementById('maskedDisplay').innerHTML = renderTokenSeq(tokens, hMap);
     showEl('maskedCard');
+}
+
+function renderTokenSeq(tokens, highlightMap) {
+    // Comme renderSeq mais travaille sur un tableau de tokens (certains multi-caractères)
+    const LINE = 60, BLOCK = 10;
+    let html = '<div class="seq-display">';
+
+    for (let ls = 0; ls < tokens.length; ls += LINE) {
+        const le = Math.min(ls + LINE, tokens.length);
+        html += `<div class="seq-line"><span class="seq-coord">${ls + 1}</span><span class="seq-bases">`;
+
+        for (let i = ls; i < le; i++) {
+            if (i > ls && (i - ls) % BLOCK === 0) html += ' ';
+            const token = tokens[i];
+            const type  = highlightMap.get(i);
+            if      (type === 'pos') html += `<span class="highlight-pos">${token}</span>`;
+            else if (type === 'n')   html += `<span class="highlight-n">${token}</span>`;
+            else                     html += token;
+        }
+
+        html += '</span></div>';
+    }
+    return html + '</div>';
 }
 
 // =============================================================
