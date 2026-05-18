@@ -1,51 +1,142 @@
-const https = require('https');
+// Liftover via fichiers chain UCSC (streamés et parsés à la volée)
+// Évite les limites de l'API REST UCSC qui ne connaît pas tous les assemblages
 
-// Fait un GET HTTPS en suivant les redirections HTTPS uniquement
-function httpsGet(url, maxRedirects = 5) {
+const https = require('https');
+const zlib  = require('zlib');
+
+// ----------- Téléchargement streamé du fichier chain --------
+
+function liftoverWithChainFile(fromDb, toDb, chrom, pos0) {
+    // Convention UCSC pour les noms de fichiers chain
+    const toDbCap = toDb.charAt(0).toUpperCase() + toDb.slice(1);
+    const url = `https://hgdownload.soe.ucsc.edu/goldenPath/${fromDb}/liftOver/` +
+                `${fromDb}To${toDbCap}.over.chain.gz`;
+
     return new Promise((resolve, reject) => {
         https.get(url, (res) => {
-            const { statusCode, headers } = res;
-
-            if ([301, 302, 303, 307, 308].includes(statusCode)) {
-                const location = headers.location || '';
-                if (!location.startsWith('https://')) {
-                    // Redirection vers HTTP ou page d'aide → base invalide
-                    return resolve({ statusCode: 404, body: JSON.stringify({
-                        error: `Assemblage non disponible dans l'API UCSC (redirigé vers ${location})`
-                    })});
-                }
-                if (maxRedirects === 0) {
-                    return resolve({ statusCode: 500, body: JSON.stringify({ error: 'Trop de redirections' }) });
-                }
-                return httpsGet(location, maxRedirects - 1).then(resolve).catch(reject);
+            if (res.statusCode === 404) {
+                return reject(new Error(
+                    `Fichier chain introuvable : ${fromDb}→${toDb}. ` +
+                    `URL essayée : ${url}`
+                ));
+            }
+            if (res.statusCode !== 200) {
+                return reject(new Error(`Téléchargement chain : HTTP ${res.statusCode}`));
             }
 
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => resolve({ statusCode, body: data }));
-        }).on('error', (e) => reject(e));
+            const gunzip = zlib.createGunzip();
+            res.pipe(gunzip);
+
+            let buffer       = '';
+            let chain        = null;  // chaîne courante
+            let tPos, qPos;
+            let result       = null;
+            let done         = false;
+
+            function processLine(line) {
+                if (done) return;
+                const t = line.trim();
+                if (!t) return;
+
+                if (t.startsWith('chain')) {
+                    // En-tête d'une nouvelle chaîne
+                    const p = t.split(/\s+/);
+                    chain = {
+                        tName:   p[2],  // chrom source
+                        tStrand: p[4],
+                        tStart:  parseInt(p[5]),
+                        tEnd:    parseInt(p[6]),
+                        qName:   p[7],  // chrom cible
+                        qSize:   parseInt(p[8]),
+                        qStrand: p[9],
+                        qStart:  parseInt(p[10])
+                    };
+                    tPos = chain.tStart;
+                    qPos = chain.qStart;
+                } else if (chain) {
+                    // Bloc d'alignement
+                    // On ne traite que si le chrom source correspond et couvre notre position
+                    if (chain.tName !== chrom || pos0 < chain.tStart || pos0 >= chain.tEnd) return;
+
+                    const p    = t.split(/\s+/);
+                    const size = parseInt(p[0]);
+                    const dt   = p[1] ? parseInt(p[1]) : 0;
+                    const dq   = p[2] ? parseInt(p[2]) : 0;
+
+                    if (pos0 >= tPos && pos0 < tPos + size) {
+                        const offset = pos0 - tPos;
+                        let mappedPos;
+                        if (chain.qStrand === '+') {
+                            mappedPos = qPos + offset;
+                        } else {
+                            // Brin complémentaire : coordonnée depuis la fin
+                            mappedPos = chain.qSize - (qPos + size - offset) - 1;
+                        }
+                        result = { chrom: chain.qName, pos0: mappedPos, strand: chain.qStrand };
+                        done = true;
+                        try { res.destroy(); } catch {}  // Arrêter le téléchargement
+                    } else {
+                        tPos += size + dt;
+                        qPos += size + dq;
+                    }
+                }
+            }
+
+            gunzip.on('data', (chunk) => {
+                if (done) return;
+                buffer += chunk.toString('ascii');
+                const lines = buffer.split('\n');
+                buffer = lines.pop();  // Garder la ligne incomplète
+                lines.forEach(processLine);
+            });
+
+            const finish = () => resolve(result);
+            gunzip.on('end',   finish);
+            gunzip.on('error', (e) => done ? resolve(result) : reject(e));
+            res.on('error',    (e) => done ? resolve(result) : reject(e));
+            res.on('close',    finish);
+        }).on('error', reject);
     });
 }
 
-exports.handler = async (event) => {
-    try {
-        const params = new URLSearchParams(event.queryStringParameters).toString();
-        const url = `https://api.genome.ucsc.edu/liftover?${params}`;
-        const result = await httpsGet(url);
+// ----------- Handler Netlify --------------------------------
 
-        return {
-            statusCode: result.statusCode,
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            },
-            body: result.body
-        };
+exports.handler = async (event) => {
+    const headers = {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+    };
+
+    const { fromDb, toDb, chrom, start, end } = event.queryStringParameters || {};
+    if (!fromDb || !toDb || !chrom || start === undefined) {
+        return { statusCode: 400, headers,
+                 body: JSON.stringify({ error: 'Paramètres manquants (fromDb, toDb, chrom, start, end)' }) };
+    }
+
+    const pos0 = parseInt(start);
+
+    try {
+        const result = await liftoverWithChainFile(fromDb, toDb, chrom, pos0);
+
+        if (!result) {
+            return { statusCode: 200, headers, body: JSON.stringify({
+                mappedCoordinates:   [],
+                unmappedCoordinates: [{ reason: 'Position non mappable dans cet assemblage cible' }]
+            })};
+        }
+
+        // Format identique à l'API REST UCSC
+        return { statusCode: 200, headers, body: JSON.stringify({
+            mappedCoordinates: [{
+                chrom:  result.chrom,
+                start:  result.pos0,
+                end:    result.pos0 + 1,
+                strand: result.strand
+            }],
+            unmappedCoordinates: []
+        })};
+
     } catch (e) {
-        return {
-            statusCode: 500,
-            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-            body: JSON.stringify({ error: e.message })
-        };
+        return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
     }
 };
