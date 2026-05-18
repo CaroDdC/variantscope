@@ -456,23 +456,29 @@ function displayMaskedSequence(tokens, variants, mutIdxStart, mutIdxEnd, chrom, 
 }
 
 function renderTokenSeq(tokens, highlightMap) {
-    // Comme renderSeq mais travaille sur un tableau de tokens (certains multi-caractères)
     const LINE = 60, BLOCK = 10;
     let html = '<div class="seq-display">';
-
     for (let ls = 0; ls < tokens.length; ls += LINE) {
         const le = Math.min(ls + LINE, tokens.length);
         html += `<div class="seq-line"><span class="seq-coord">${ls + 1}</span><span class="seq-bases">`;
-
-        for (let i = ls; i < le; i++) {
-            if (i > ls && (i - ls) % BLOCK === 0) html += ' ';
-            const token = tokens[i];
-            const type  = highlightMap.get(i);
-            if      (type === 'pos') html += `<span class="highlight-pos">${token}</span>`;
-            else if (type === 'n')   html += `<span class="highlight-n">${token}</span>`;
-            else                     html += token;
+        let i = ls;
+        while (i < le) {
+            const posInLine = i - ls;
+            if (posInLine > 0 && posInLine % BLOCK === 0) html += ' ';
+            const type = highlightMap.get(i);
+            if (type === 'pos') {
+                let run = tokens[i++];
+                while (i < le && highlightMap.get(i) === 'pos') {
+                    if ((i - ls) % BLOCK === 0) run += ' ';
+                    run += tokens[i++];
+                }
+                html += `<span class="highlight-pos">${run}</span>`;
+            } else if (type === 'n') {
+                html += `<span class="highlight-n">${tokens[i++]}</span>`;
+            } else {
+                html += tokens[i++];
+            }
         }
-
         html += '</span></div>';
     }
     return html + '</div>';
@@ -488,12 +494,23 @@ function renderSeq(seq, highlightMap) {
     for (let ls = 0; ls < seq.length; ls += LINE) {
         const le = Math.min(ls + LINE, seq.length);
         html += `<div class="seq-line"><span class="seq-coord">${ls + 1}</span><span class="seq-bases">`;
-        for (let i = ls; i < le; i++) {
-            if (i > ls && (i - ls) % BLOCK === 0) html += ' ';
+        let i = ls;
+        while (i < le) {
+            const posInLine = i - ls;
+            if (posInLine > 0 && posInLine % BLOCK === 0) html += ' ';
             const type = highlightMap.get(i);
-            if      (type === 'pos') html += `<span class="highlight-pos">${seq[i]}</span>`;
-            else if (type === 'n')   html += `<span class="highlight-n">N</span>`;
-            else                     html += seq[i];
+            if (type === 'pos') {
+                let run = seq[i++];
+                while (i < le && highlightMap.get(i) === 'pos') {
+                    if ((i - ls) % BLOCK === 0) run += ' ';
+                    run += seq[i++];
+                }
+                html += `<span class="highlight-pos">${run}</span>`;
+            } else if (type === 'n') {
+                html += `<span class="highlight-n">${seq[i++]}</span>`;
+            } else {
+                html += seq[i++];
+            }
         }
         html += '</span></div>';
     }
