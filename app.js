@@ -230,9 +230,10 @@ async function runEnsemblPipeline(species, genomeCfg, chrom, position, windowSiz
 
 async function ucscLiftOver(fromDb, toDb, chrom, position) {
     // UCSC : coordonnées 0-based half-open pour une seule base
+    // Appel via proxy Netlify pour éviter les restrictions CORS
     const start = position - 1;
     const end   = position;
-    const url = `https://api.genome.ucsc.edu/liftover` +
+    const url = `/.netlify/functions/liftover` +
                 `?fromDb=${fromDb}&toDb=${toDb}` +
                 `&chrom=${encodeURIComponent(chrom)}&start=${start}&end=${end}`;
 
