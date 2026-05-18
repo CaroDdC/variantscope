@@ -347,19 +347,18 @@ function buildMaskedSeq(seq, variants, regionStart1, mutIdx) {
         }
     }
 
-    // 2. Appliquer le masquage
+    // 2. Masquer les variants (sauf la position ciblée, gérée après)
     variants.forEach(v => {
         const i0 = v.start - regionStart1;
         const i1 = (v.end !== undefined ? v.end : v.start) - regionStart1;
         for (let i = i0; i <= i1; i++) {
-            if (i < 0 || i >= tokens.length) continue;
-            if (i === mutIdx) {
-                tokens[i] = mutLabel || '[' + seq[mutIdx] + '/?]';
-            } else {
-                tokens[i] = 'N';
-            }
+            if (i < 0 || i >= tokens.length || i === mutIdx) continue;
+            tokens[i] = 'N';
         }
     });
+
+    // 3. Toujours annoter la position ciblée
+    tokens[mutIdx] = mutLabel || '[' + seq[mutIdx] + '/?]';
 
     return tokens;
 }
