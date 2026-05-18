@@ -181,6 +181,19 @@ async function runUCSCPipeline(species, genomeCfg, chrom, posStart, posEnd, wind
         _maskedSeq = '';
         showVariantUnavailable(genomeCfg.id, 'ROS_Cfam_1.0');
     }
+
+    // Position canFam3
+    if (species.ensemblSpecies === 'canis_lupus_familiaris') {
+        if (genomeCfg.ucscDb === 'canFam3') {
+            displayCanFam3Position(chrom, posStart, posEnd);
+        } else {
+            try {
+                setLoadingMsg('Calcul de la position canFam3…');
+                const cf3 = await ucscLiftOver(genomeCfg.ucscDb, 'canFam3', chrom, posStart);
+                displayCanFam3Position(cf3.chrom, cf3.position, cf3.position + (posEnd - posStart));
+            } catch { displayCanFam3Position(null, null, null); }
+        }
+    }
 }
 
 // =============================================================
@@ -232,6 +245,16 @@ async function runEnsemblPipeline(species, genomeCfg, chrom, posStart, posEnd, w
     const masked = buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
     _maskedSeq = masked.join('');
     displayMaskedSequence(masked, variants, mutIdxStart, mutIdxEnd, finalChrom, winStart1, winEnd1);
+
+    // Position canFam3 (chien uniquement)
+    if (species.ensemblSpecies === 'canis_lupus_familiaris') {
+        try {
+            setLoadingMsg('Calcul de la position canFam3…');
+            const cf3Chrom = 'chr' + finalChrom;
+            const cf3 = await ucscLiftOver('GCF_014441545.1', 'canFam3', cf3Chrom, finalPosStart);
+            displayCanFam3Position(cf3.chrom, cf3.position, cf3.position + (posEnd - posStart));
+        } catch { displayCanFam3Position(null, null, null); }
+    }
 }
 
 // =============================================================
@@ -452,6 +475,18 @@ function displayVariants(variants) {
     showEl('variantsCard');
 }
 
+function displayCanFam3Position(chrom, posStart, posEnd) {
+    const el = document.getElementById('canfam3Content');
+    if (!chrom) {
+        el.textContent = 'Position canFam3 non disponible pour cette région.';
+    } else {
+        el.textContent = posStart === posEnd
+            ? `${chrom}:${fmt(posStart)}`
+            : `${chrom}:${fmt(posStart)}–${fmt(posEnd)}`;
+    }
+    showEl('canfam3Card');
+}
+
 function showVariantUnavailable(fromAsm, targetAsm) {
     document.getElementById('variantCount').textContent = 'Variants non disponibles';
     document.getElementById('variantTable').innerHTML =
@@ -562,7 +597,7 @@ function showEl(id) { document.getElementById(id)?.classList.remove('hidden'); }
 function hideEl(id) { document.getElementById(id)?.classList.add('hidden'); }
 
 function resetUI() {
-    ['sequenceCard', 'variantsCard', 'maskedCard', 'liftoverInfo', 'loading'].forEach(hideEl);
+    ['sequenceCard', 'variantsCard', 'maskedCard', 'liftoverInfo', 'loading', 'canfam3Card'].forEach(hideEl);
 }
 
 function showError(msg) {
