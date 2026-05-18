@@ -13,8 +13,8 @@ const SPECIES_CONFIG = {
         label:          'Humain (Homo sapiens)',
         ensemblSpecies: 'homo_sapiens',
         genomes: [
-            { id: 'hg38', label: 'hg38 / GRCh38 (récent)' },
-            { id: 'hg19', label: 'hg19 / GRCh37' }
+            { id: 'hg38',    label: 'hg38 / GRCh38 (récent)' },
+            { id: 'hg19',    label: 'hg19 / GRCh37' }
         ],
         // Génome cible pour Ensembl (doit correspondre à l'assembly Ensembl par défaut)
         targetGenome: 'hg38'
@@ -23,10 +23,40 @@ const SPECIES_CONFIG = {
         label:          'Souris (Mus musculus)',
         ensemblSpecies: 'mus_musculus',
         genomes: [
-            { id: 'mm39', label: 'mm39 / GRCm39 (récent)' },
-            { id: 'mm10', label: 'mm10 / GRCm38' }
+            { id: 'mm39',    label: 'mm39 / GRCm39 (récent)' },
+            { id: 'mm10',    label: 'mm10 / GRCm38' }
         ],
         targetGenome: 'mm39'
+    },
+    dog: {
+        label:          'Chien (Canis lupus familiaris)',
+        ensemblSpecies: 'canis_lupus_familiaris',
+        genomes: [
+            { id: 'canFam5', label: 'canFam5 / ROS_Cfam_1.0 (récent)' },
+            { id: 'canFam3', label: 'canFam3 / CanFam3.1' }
+        ],
+        // canFam5 = ROS_Cfam_1.0 : assembly utilisé par Ensembl
+        targetGenome: 'canFam5'
+    },
+    cat: {
+        label:          'Chat (Felis catus)',
+        ensemblSpecies: 'felis_catus',
+        genomes: [
+            { id: 'felCat9', label: 'felCat9 / Felis_catus_9.0 (récent)' },
+            { id: 'felCat8', label: 'felCat8 / Felis_catus_8.0' }
+        ],
+        // felCat9 = Felis_catus_9.0 : assembly utilisé par Ensembl
+        targetGenome: 'felCat9'
+    },
+    horse: {
+        label:          'Cheval (Equus caballus)',
+        ensemblSpecies: 'equus_caballus',
+        genomes: [
+            { id: 'equCab3', label: 'equCab3 / EquCab3.0 (récent)' },
+            { id: 'equCab2', label: 'equCab2 / EquCab2.0' }
+        ],
+        // equCab3 = EquCab3.0 : assembly utilisé par Ensembl
+        targetGenome: 'equCab3'
     }
 };
 
