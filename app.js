@@ -271,7 +271,7 @@ async function ucscLiftOver(fromDb, toDb, chrom, position) {
 
     const start = position - 1;
     const end   = position;
-    const url = `/.netlify/functions/liftover` +
+    const url = `/api/liftover` +
                 `?fromDb=${fromDb}&toDb=${toDb}` +
                 `&chrom=${encodeURIComponent(chrom)}&start=${start}&end=${end}`;
 
