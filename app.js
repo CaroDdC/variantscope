@@ -354,8 +354,7 @@ function buildMaskedSeq(seq, variants, regionStart1, mutIdx) {
         for (let i = i0; i <= i1; i++) {
             if (i < 0 || i >= tokens.length) continue;
             if (i === mutIdx) {
-                if (mutLabel) tokens[i] = mutLabel;  // [ref/var] sur la position ciblée
-                // sinon on laisse la base de référence
+                tokens[i] = mutLabel || '[' + seq[mutIdx] + '/?]';
             } else {
                 tokens[i] = 'N';
             }
