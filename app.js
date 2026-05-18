@@ -149,54 +149,56 @@ document.getElementById('variantForm').addEventListener('submit', async (e) => {
 
 // ----------- Appels API Ensembl (CORS OK) --------------------
 
+const ENSEMBL_HEADERS = { 'Accept': 'application/json' };
+
+async function ensemblFetch(url) {
+    const resp = await fetch(url, { headers: ENSEMBL_HEADERS });
+    if (!resp.ok) {
+        let detail = '';
+        try { const e = await resp.json(); detail = e.error || e.message || ''; } catch {}
+        throw new Error(`Ensembl HTTP ${resp.status}${detail ? ' — ' + detail : ''}`);
+    }
+    return resp.json();
+}
+
 async function doLiftOver(ensemblSpecies, fromAsm, toAsm, chrom, position) {
-    // Ensembl /map : coordonnées 1-based inclusives
+    // GET /map/:species/:asm_one/:region/:asm_two  (coordonnées 1-based)
     const url = `https://rest.ensembl.org/map/${ensemblSpecies}` +
-                `/${encodeURIComponent(fromAsm)}` +
-                `/${encodeURIComponent(chrom)}:${position}..${position}` +
-                `/${encodeURIComponent(toAsm)}` +
-                `?content-type=application/json`;
+                `/${fromAsm}/${chrom}:${position}..${position}/${toAsm}`;
 
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`LiftOver : erreur HTTP ${resp.status}`);
+    const data = await ensemblFetch(url);
 
-    const data = await resp.json();
-    if (data.error) throw new Error('LiftOver : ' + data.error);
     if (!data.mappings || data.mappings.length === 0) {
-        throw new Error('LiftOver : aucune correspondance trouvée pour cette position dans le génome cible.');
+        throw new Error(
+            `LiftOver ${fromAsm} → ${toAsm} : aucune correspondance pour ${chrom}:${position}.\n` +
+            `Essayez de saisir vos coordonnées directement en ${toAsm}.`
+        );
     }
 
     const m = data.mappings[0].mapped;
-    return {
-        chrom:    m.seq_region_name,   // sans préfixe "chr"
-        position: m.start              // 1-based
-    };
+    return { chrom: m.seq_region_name, position: m.start };
 }
 
 async function fetchSequence(ensemblSpecies, chrom, start1, end1) {
-    // Ensembl /sequence/region : coordonnées 1-based inclusives
+    // GET /sequence/region/:species/:region  (coordonnées 1-based inclusives)
     const url = `https://rest.ensembl.org/sequence/region/${ensemblSpecies}` +
-                `/${encodeURIComponent(chrom)}:${start1}..${end1}` +
-                `?content-type=application/json`;
+                `/${chrom}:${start1}..${end1}?type=genomic`;
 
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`Séquence : erreur HTTP ${resp.status}`);
-
-    const data = await resp.json();
-    if (data.error) throw new Error('Séquence : ' + data.error);
-
+    const data = await ensemblFetch(url);
     return data.seq.toUpperCase();
 }
 
 async function fetchVariants(ensemblSpecies, chrom, start1, end1) {
     const url = `https://rest.ensembl.org/overlap/region/${ensemblSpecies}` +
-                `/${encodeURIComponent(chrom)}:${start1}-${end1}` +
-                `?feature=variation;content-type=application/json`;
+                `/${chrom}:${start1}-${end1}?feature=variation`;
 
-    const resp = await fetch(url);
+    const resp = await fetch(url, { headers: ENSEMBL_HEADERS });
     if (resp.status === 404) return [];
-    if (!resp.ok) throw new Error(`Variants : erreur HTTP ${resp.status}`);
-
+    if (!resp.ok) {
+        let detail = '';
+        try { const e = await resp.json(); detail = e.error || ''; } catch {}
+        throw new Error(`Variants Ensembl HTTP ${resp.status}${detail ? ' — ' + detail : ''}`);
+    }
     const data = await resp.json();
     return Array.isArray(data) ? data : [];
 }
