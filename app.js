@@ -32,10 +32,12 @@ const SPECIES_CONFIG = {
         label:          'Chien (Canis lupus familiaris)',
         ensemblSpecies: 'canis_lupus_familiaris',
         genomes: [
-            { id: 'canFam5', label: 'canFam5 / ROS_Cfam_1.0 (récent)' },
+            { id: 'canFam5', label: 'canFam5 / ROS_Cfam_1.0 (cible Ensembl)' },
+            { id: 'canFam6', label: 'canFam6 / UMICH_Zoey_3.1' },
+            { id: 'canFam4', label: 'canFam4 / UU_Cfam_GSD_1.0' },
             { id: 'canFam3', label: 'canFam3 / CanFam3.1' }
         ],
-        // canFam5 = ROS_Cfam_1.0 : assembly utilisé par Ensembl
+        // canFam5 = ROS_Cfam_1.0 : assembly utilisé par Ensembl — toujours la cible du LiftOver
         targetGenome: 'canFam5'
     },
     cat: {
