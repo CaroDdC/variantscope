@@ -373,8 +373,22 @@ function buildMaskedSeq(seq, variants, regionStart1, mutIdxStart, mutIdxEnd) {
     // 3. Annoter la/les position(s) ciblée(s)
     if (mutIdxStart === mutIdxEnd) {
         tokens[mutIdxStart] = mutLabel || '[' + seq[mutIdxStart] + '/?]';
+    } else {
+        // Intervalle : chercher un variant qui chevauche la plage
+        let rangeLabel = null;
+        for (const v of variants) {
+            const i0 = v.start - regionStart1;
+            const i1 = (v.end !== undefined ? v.end : v.start) - regionStart1;
+            if (i0 <= mutIdxEnd && i1 >= mutIdxStart) {
+                const alleles = Array.isArray(v.alleles) ? v.alleles :
+                                (typeof v.alleles === 'string' ? v.alleles.split('/') : []);
+                if (alleles.length > 0) { rangeLabel = '[' + alleles.join('/') + ']'; break; }
+            }
+        }
+        const refBases = seq.slice(mutIdxStart, mutIdxEnd + 1);
+        tokens[mutIdxStart] = rangeLabel || '[' + refBases + '/?]';
+        for (let i = mutIdxStart + 1; i <= mutIdxEnd; i++) tokens[i] = '';
     }
-    // Pour un intervalle, les bases originales sont conservées et surlignées via hMap
 
     return tokens;
 }
