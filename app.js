@@ -77,7 +77,6 @@ function initForm() {
         sel.appendChild(opt);
     });
     refreshGenomeOptions();
-    updateLiftoverNote();
 }
 
 function refreshGenomeOptions() {
@@ -92,17 +91,7 @@ function refreshGenomeOptions() {
     });
 }
 
-function updateLiftoverNote() {
-    const speciesKey = document.getElementById('species').value;
-    // Note visible uniquement pour le chien (plusieurs backends)
-    const show = speciesKey === 'dog';
-    document.getElementById('liftoverNote').classList.toggle('hidden', !show);
-}
-
-document.getElementById('species').addEventListener('change', () => {
-    refreshGenomeOptions();
-    updateLiftoverNote();
-});
+document.getElementById('species').addEventListener('change', refreshGenomeOptions);
 
 // ----------- Soumission --------------------------------------
 
