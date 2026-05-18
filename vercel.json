@@ -1,0 +1,6 @@
+{
+  "functions": {
+    "api/liftover.js": { "maxDuration": 30 },
+    "api/ucsc-genomes.js": { "maxDuration": 10 }
+  }
+}
