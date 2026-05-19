@@ -307,6 +307,28 @@ footer {
     margin-top: 2rem;
 }
 
+/* ===== LiftOver note ===== */
+.liftover-note {
+    margin-top: 1rem;
+    padding: .75rem 1rem;
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-radius: 8px;
+    font-size: .85rem;
+    color: #92400e;
+    line-height: 1.5;
+}
+.liftover-note a { color: #b45309; }
+
+/* ===== GC badge ===== */
+.gc-badge {
+    margin-left: auto;
+    font-size: .8rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    letter-spacing: .02em;
+}
+
 /* ===== Utility ===== */
 .hidden { display: none !important; }
 
