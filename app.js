@@ -432,6 +432,11 @@ function displaySequence(seq, mutIdxStart, mutIdxEnd, chrom, start1, end1) {
     const hMap = new Map();
     for (let i = mutIdxStart; i <= mutIdxEnd; i++) hMap.set(i, 'pos');
     document.getElementById('sequenceDisplay').innerHTML = renderSeq(seq, hMap);
+
+    const gcCount = (seq.match(/[GC]/g) || []).length;
+    document.getElementById('gcContent').textContent =
+        `GC : ${((gcCount / seq.length) * 100).toFixed(1)} %`;
+
     showEl('sequenceCard');
 }
 
