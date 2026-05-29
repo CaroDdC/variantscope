@@ -377,7 +377,9 @@ function buildMaskedSeq(seq, variants, regionStart1, mutIdxStart, mutIdxEnd) {
         for (const v of variants) {
             const i0 = v.start - regionStart1;
             const i1 = (v.end !== undefined ? v.end : v.start) - regionStart1;
-            if (mutIdxStart >= i0 && mutIdxStart <= i1) {
+            // Pour les insertions (i1 < i0), couvre la position i0
+            const covers = i1 < i0 ? (mutIdxStart === i0) : (mutIdxStart >= i0 && mutIdxStart <= i1);
+            if (covers) {
                 const alleles = Array.isArray(v.alleles) ? v.alleles :
                                 (typeof v.alleles === 'string' ? v.alleles.split('/') : []);
                 if (alleles.length > 0) {
@@ -392,10 +394,18 @@ function buildMaskedSeq(seq, variants, regionStart1, mutIdxStart, mutIdxEnd) {
     variants.forEach(v => {
         const i0 = v.start - regionStart1;
         const i1 = (v.end !== undefined ? v.end : v.start) - regionStart1;
-        for (let i = i0; i <= i1; i++) {
-            if (i < 0 || i >= tokens.length) continue;
-            if (i >= mutIdxStart && i <= mutIdxEnd) continue;
-            tokens[i] = 'N';
+
+        if (i1 < i0) {
+            // Insertion Ensembl : end < start → un seul N à la position start
+            if (i0 >= 0 && i0 < tokens.length && !(i0 >= mutIdxStart && i0 <= mutIdxEnd)) {
+                tokens[i0] = 'N';
+            }
+        } else {
+            for (let i = i0; i <= i1; i++) {
+                if (i < 0 || i >= tokens.length) continue;
+                if (i >= mutIdxStart && i <= mutIdxEnd) continue;
+                tokens[i] = 'N';
+            }
         }
     });
 
@@ -408,7 +418,9 @@ function buildMaskedSeq(seq, variants, regionStart1, mutIdxStart, mutIdxEnd) {
         for (const v of variants) {
             const i0 = v.start - regionStart1;
             const i1 = (v.end !== undefined ? v.end : v.start) - regionStart1;
-            if (i0 <= mutIdxEnd && i1 >= mutIdxStart) {
+            const effMin = Math.min(i0, i1);
+            const effMax = Math.max(i0, i1);
+            if (effMin <= mutIdxEnd && effMax >= mutIdxStart) {
                 const alleles = Array.isArray(v.alleles) ? v.alleles :
                                 (typeof v.alleles === 'string' ? v.alleles.split('/') : []);
                 if (alleles.length > 0) { rangeLabel = '[' + alleles.join('/') + ']'; break; }
