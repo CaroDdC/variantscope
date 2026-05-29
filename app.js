@@ -174,9 +174,10 @@ async function runUCSCPipeline(species, genomeCfg, chrom, posStart, posEnd, wind
         const chromEns = finalChrom.replace(/^chr/i, '');
         const variants = await ensemblVariants(species.ensemblSpecies, chromEns, winStart1, winEnd0);
         displayVariants(variants);
-        const masked = buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
+        const { tokens: masked, mutIdxStart: mStart, mutIdxEnd: mEnd } =
+            buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
         _maskedSeq = masked.join('');
-        displayMaskedSequence(masked, variants, mutIdxStart, mutIdxEnd, finalChrom, winStart1, winEnd0);
+        displayMaskedSequence(masked, variants, mStart, mEnd, finalChrom, winStart1, winEnd0);
     } else {
         _maskedSeq = '';
         showVariantUnavailable(genomeCfg.id, 'ROS_Cfam_1.0');
@@ -242,9 +243,10 @@ async function runEnsemblPipeline(species, genomeCfg, chrom, posStart, posEnd, w
     displaySequence(sequence, mutIdxStart, mutIdxEnd, finalChrom, winStart1, winEnd1);
     displayVariants(variants);
 
-    const masked = buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
+    const { tokens: masked, mutIdxStart: mStart, mutIdxEnd: mEnd } =
+        buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
     _maskedSeq = masked.join('');
-    displayMaskedSequence(masked, variants, mutIdxStart, mutIdxEnd, finalChrom, winStart1, winEnd1);
+    displayMaskedSequence(masked, variants, mStart, mEnd, finalChrom, winStart1, winEnd1);
 
     // Position canFam3 (chien uniquement)
     if (species.ensemblSpecies === 'canis_lupus_familiaris') {
@@ -365,55 +367,61 @@ async function ensemblVariants(ensemblSpecies, chrom, start1, end1) {
 // =============================================================
 
 function buildMaskedSeq(seq, variants, regionStart1, mutIdxStart, mutIdxEnd) {
-    // Retourne un tableau de tokens :
-    //   - position(s) ciblée(s) : [ref/var] (position unique) ou bases surlignées (intervalle)
-    //   - autres variants       : N
-    //   - reste                 : base originale
+    // Retourne { tokens, mutIdxStart, mutIdxEnd } avec indices ajustés après insertions.
+    // - position(s) ciblée(s) : [ref/var] ou bases surlignées
+    // - insertions             : N inséré entre les deux bases flanquantes
+    // - autres variants        : base remplacée par N
     const tokens = seq.split('');
+    let adjMutStart = mutIdxStart;
+    let adjMutEnd   = mutIdxEnd;
 
-    // 1. Pour une position unique : chercher le label allélique dans Ensembl
+    // 1. Label allélique (indices originaux, avant toute modification)
     let mutLabel = null;
     if (mutIdxStart === mutIdxEnd) {
         for (const v of variants) {
             const i0 = v.start - regionStart1;
             const i1 = (v.end !== undefined ? v.end : v.start) - regionStart1;
-            // Pour les insertions (i1 < i0), couvre la position i0
             const covers = i1 < i0 ? (mutIdxStart === i0) : (mutIdxStart >= i0 && mutIdxStart <= i1);
             if (covers) {
                 const alleles = Array.isArray(v.alleles) ? v.alleles :
                                 (typeof v.alleles === 'string' ? v.alleles.split('/') : []);
-                if (alleles.length > 0) {
-                    mutLabel = '[' + alleles.join('/') + ']';
-                    break;
-                }
+                if (alleles.length > 0) { mutLabel = '[' + alleles.join('/') + ']'; break; }
             }
         }
     }
 
-    // 2. Masquer les variants hors de l'intervalle ciblé
-    variants.forEach(v => {
-        const i0 = v.start - regionStart1;
-        const i1 = (v.end !== undefined ? v.end : v.start) - regionStart1;
+    // 2. Masquage — triés par position croissante pour suivre l'offset des insertions
+    const sorted = [...variants].sort((a, b) => a.start - b.start);
+    let offset = 0;
 
-        if (i1 < i0) {
-            // Insertion Ensembl : end < start → un seul N à la position start
-            if (i0 >= 0 && i0 < tokens.length && !(i0 >= mutIdxStart && i0 <= mutIdxEnd)) {
-                tokens[i0] = 'N';
-            }
+    for (const v of sorted) {
+        const rawI0 = v.start - regionStart1;
+        const rawI1 = (v.end !== undefined ? v.end : v.start) - regionStart1;
+
+        if (rawI1 < rawI0) {
+            // Insertion Ensembl (end < start) : insérer un N entre les bases flanquantes
+            const insertPos = rawI0 + offset;
+            if (insertPos < 0 || insertPos > tokens.length) continue;
+            if (insertPos >= adjMutStart && insertPos <= adjMutEnd + 1) continue; // dans la plage ciblée
+            tokens.splice(insertPos, 0, 'N');
+            offset++;
+            if (insertPos <= adjMutStart)      { adjMutStart++; adjMutEnd++; }
+            else if (insertPos <= adjMutEnd)   { adjMutEnd++; }
         } else {
+            const i0 = rawI0 + offset;
+            const i1 = rawI1 + offset;
             for (let i = i0; i <= i1; i++) {
                 if (i < 0 || i >= tokens.length) continue;
-                if (i >= mutIdxStart && i <= mutIdxEnd) continue;
+                if (i >= adjMutStart && i <= adjMutEnd) continue;
                 tokens[i] = 'N';
             }
         }
-    });
+    }
 
-    // 3. Annoter la/les position(s) ciblée(s)
+    // 3. Annoter la/les position(s) ciblée(s) (indices ajustés)
     if (mutIdxStart === mutIdxEnd) {
-        tokens[mutIdxStart] = mutLabel || '[' + seq[mutIdxStart] + '/?]';
+        tokens[adjMutStart] = mutLabel || '[' + seq[mutIdxStart] + '/?]';
     } else {
-        // Intervalle : chercher un variant qui chevauche la plage
         let rangeLabel = null;
         for (const v of variants) {
             const i0 = v.start - regionStart1;
@@ -427,11 +435,11 @@ function buildMaskedSeq(seq, variants, regionStart1, mutIdxStart, mutIdxEnd) {
             }
         }
         const refBases = seq.slice(mutIdxStart, mutIdxEnd + 1);
-        tokens[mutIdxStart] = rangeLabel || '[' + refBases + '/?]';
-        for (let i = mutIdxStart + 1; i <= mutIdxEnd; i++) tokens[i] = '';
+        tokens[adjMutStart] = rangeLabel || '[' + refBases + '/?]';
+        for (let i = adjMutStart + 1; i <= adjMutEnd; i++) tokens[i] = '';
     }
 
-    return tokens;
+    return { tokens, mutIdxStart: adjMutStart, mutIdxEnd: adjMutEnd };
 }
 
 // =============================================================
