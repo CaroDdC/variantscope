@@ -57,6 +57,28 @@ const SPECIES_CONFIG = {
 let _rawSeq    = '';
 let _maskedSeq = '';
 
+// Correspondance accessions RefSeq → noms karyotypiques pour les assemblages GCF
+// (les fichiers chain UCSC utilisent les accessions NC_ comme noms de chromosomes)
+const CHROM_ALIAS = {
+    'GCF_018350175.1': {  // F.catus_Fca126_mat1.0
+        'NC_001700.1': 'MT',
+        'NC_058368.1': 'A1',  'NC_058369.1': 'A2',  'NC_058370.1': 'A3',
+        'NC_058371.1': 'B1',  'NC_058372.1': 'B2',  'NC_058373.1': 'B3',
+        'NC_058374.1': 'B4',  'NC_058375.1': 'C1',  'NC_058376.1': 'C2',
+        'NC_058377.1': 'D1',  'NC_058378.1': 'D2',  'NC_058379.1': 'D3',
+        'NC_058380.1': 'D4',  'NC_058381.1': 'E1',  'NC_058382.1': 'E2',
+        'NC_058383.1': 'E3',  'NC_058384.1': 'F1',  'NC_058385.1': 'F2',
+        'NC_058386.1': 'X'
+    }
+};
+
+// Convertit un accession NC_ en nom de chromosome standard (sans préfixe)
+function resolveChromName(db, chrom) {
+    const map = CHROM_ALIAS[db];
+    if (!map) return chrom;
+    return map[chrom] || chrom;
+}
+
 // ----------- Parsing de position ---------------------------------
 
 function parsePosition(str) {
@@ -157,6 +179,10 @@ async function runUCSCPipeline(species, genomeCfg, chrom, posStart, posEnd, wind
                            chrom, posStart, posEnd, finalChrom, finalPosStart, finalPosEnd);
     }
 
+    // Résoudre le nom de chromosome (accession NC_ → nom karyotypique si nécessaire)
+    const baseChrom = resolveChromName(finalDb, finalChrom);
+    const ucscChrom = /^NC_/.test(finalChrom) ? 'chr' + baseChrom : finalChrom;
+
     // Fenêtre centrée sur le milieu de l'intervalle (UCSC : 0-based half-open)
     const midPos    = Math.round((finalPosStart + finalPosEnd) / 2);
     const winStart0 = Math.max(0, midPos - 1 - windowSize);
@@ -166,25 +192,24 @@ async function runUCSCPipeline(species, genomeCfg, chrom, posStart, posEnd, wind
     const mutIdxEnd   = finalPosEnd   - 1 - winStart0;
 
     setLoadingMsg('Récupération de la séquence UCSC…');
-    const sequence = await ucscSequence(finalDb, finalChrom, winStart0, winEnd0);
+    const sequence = await ucscSequence(finalDb, ucscChrom, winStart0, winEnd0);
 
     _rawSeq = sequence;
-    displaySequence(sequence, mutIdxStart, mutIdxEnd, finalChrom, winStart1, winEnd0);
+    displaySequence(sequence, mutIdxStart, mutIdxEnd, ucscChrom, winStart1, winEnd0);
 
-    // Cibles GCF connues → séquence + variants Ensembl sur les coordonnées converties
+    // Cibles GCF connues → variants Ensembl sur les coordonnées converties
     const GCF_ENSEMBL_MAP = {
-        'GCF_014441545.1': 'ROS_Cfam_1.0',   // chien
+        'GCF_014441545.1': 'ROS_Cfam_1.0',          // chien
         'GCF_018350175.1': 'F.catus_Fca126_mat1.0'  // chat
     };
     if (finalDb in GCF_ENSEMBL_MAP) {
         setLoadingMsg('Récupération des variants Ensembl…');
-        const chromEns = finalChrom.replace(/^chr/i, '');
-        const variants = await ensemblVariants(species.ensemblSpecies, chromEns, winStart1, winEnd0);
+        const variants = await ensemblVariants(species.ensemblSpecies, baseChrom, winStart1, winEnd0);
         displayVariants(variants);
         const { tokens: masked, mutIdxStart: mStart, mutIdxEnd: mEnd } =
             buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
         _maskedSeq = masked.join('');
-        displayMaskedSequence(masked, variants, mStart, mEnd, finalChrom, winStart1, winEnd0);
+        displayMaskedSequence(masked, variants, mStart, mEnd, ucscChrom, winStart1, winEnd0);
     } else {
         _maskedSeq = '';
         showVariantUnavailable(genomeCfg.id, species.targetEnsemblAsm);
