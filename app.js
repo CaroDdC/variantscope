@@ -34,10 +34,10 @@ const SPECIES_CONFIG = {
             { id: 'F.catus_Fca126_mat1.0',
               label: 'F.catus_Fca126_mat1.0 (actuel, Ensembl — variants disponibles)',
               backend: 'ensembl', ensemblAsm: 'F.catus_Fca126_mat1.0' },
-            { id: 'Felis_catus_9.0', label: 'Felis_catus_9.0 / felCat9',
-              backend: 'ensembl', ensemblAsm: 'Felis_catus_9.0' },
-            { id: 'Felis_catus_8.0', label: 'Felis_catus_8.0 / felCat8',
-              backend: 'ensembl', ensemblAsm: 'Felis_catus_8.0' }
+            { id: 'felCat9', label: 'felCat9 / Felis_catus_9.0',
+              backend: 'ucsc', ucscDb: 'felCat9', ucscTarget: 'GCF_018350175.1' },
+            { id: 'felCat8', label: 'felCat8 / Felis_catus_8.0',
+              backend: 'ucsc', ucscDb: 'felCat8', ucscTarget: 'GCF_018350175.1' }
         ],
         targetEnsemblAsm: 'F.catus_Fca126_mat1.0'
     },
@@ -171,8 +171,12 @@ async function runUCSCPipeline(species, genomeCfg, chrom, posStart, posEnd, wind
     _rawSeq = sequence;
     displaySequence(sequence, mutIdxStart, mutIdxEnd, finalChrom, winStart1, winEnd0);
 
-    // GCF_014441545.1 = ROS_Cfam_1.0 → variants Ensembl sur les mêmes coordonnées
-    if (finalDb === 'GCF_014441545.1') {
+    // Cibles GCF connues → séquence + variants Ensembl sur les coordonnées converties
+    const GCF_ENSEMBL_MAP = {
+        'GCF_014441545.1': 'ROS_Cfam_1.0',   // chien
+        'GCF_018350175.1': 'F.catus_Fca126_mat1.0'  // chat
+    };
+    if (finalDb in GCF_ENSEMBL_MAP) {
         setLoadingMsg('Récupération des variants Ensembl…');
         const chromEns = finalChrom.replace(/^chr/i, '');
         const variants = await ensemblVariants(species.ensemblSpecies, chromEns, winStart1, winEnd0);
@@ -183,7 +187,7 @@ async function runUCSCPipeline(species, genomeCfg, chrom, posStart, posEnd, wind
         displayMaskedSequence(masked, variants, mStart, mEnd, finalChrom, winStart1, winEnd0);
     } else {
         _maskedSeq = '';
-        showVariantUnavailable(genomeCfg.id, 'ROS_Cfam_1.0');
+        showVariantUnavailable(genomeCfg.id, species.targetEnsemblAsm);
     }
 
     // Position canFam3
