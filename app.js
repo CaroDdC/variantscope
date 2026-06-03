@@ -31,12 +31,15 @@ const SPECIES_CONFIG = {
         label:          'Chat (Felis catus)',
         ensemblSpecies: 'felis_catus',
         genomes: [
-            { id: 'Felis_catus_9.0', label: 'Felis_catus_9.0 / felCat9 (récent)',
+            { id: 'F.catus_Fca126_mat1.0',
+              label: 'F.catus_Fca126_mat1.0 (actuel, Ensembl — variants disponibles)',
+              backend: 'ensembl', ensemblAsm: 'F.catus_Fca126_mat1.0' },
+            { id: 'Felis_catus_9.0', label: 'Felis_catus_9.0 / felCat9',
               backend: 'ensembl', ensemblAsm: 'Felis_catus_9.0' },
             { id: 'Felis_catus_8.0', label: 'Felis_catus_8.0 / felCat8',
               backend: 'ensembl', ensemblAsm: 'Felis_catus_8.0' }
         ],
-        targetEnsemblAsm: 'Felis_catus_9.0'
+        targetEnsemblAsm: 'F.catus_Fca126_mat1.0'
     },
     horse: {
         label:          'Cheval (Equus caballus)',
