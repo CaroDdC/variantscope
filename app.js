@@ -31,13 +31,15 @@ const SPECIES_CONFIG = {
         label:          'Chat (Felis catus)',
         ensemblSpecies: 'felis_catus',
         genomes: [
-            { id: 'F.catus_Fca126_mat1.0',
-              label: 'F.catus_Fca126_mat1.0 (actuel, Ensembl — variants disponibles)',
-              backend: 'ensembl', ensemblAsm: 'F.catus_Fca126_mat1.0' },
+            // Séquence felCat9 + variants Ensembl remappés depuis Fca126
             { id: 'felCat9', label: 'felCat9 / Felis_catus_9.0',
-              backend: 'ucsc', ucscDb: 'felCat9', ucscTarget: 'GCF_018350175.1' },
+              backend: 'ucsc', ucscDb: 'felCat9', variantChainDb: 'GCF_018350175.1' },
             { id: 'felCat8', label: 'felCat8 / Felis_catus_8.0',
-              backend: 'ucsc', ucscDb: 'felCat8', ucscTarget: 'GCF_018350175.1' }
+              backend: 'ucsc', ucscDb: 'felCat8', variantChainDb: 'GCF_018350175.1' },
+            // Fca126 direct (pas de liftover, variants natifs Ensembl)
+            { id: 'F.catus_Fca126_mat1.0',
+              label: 'F.catus_Fca126_mat1.0 (Ensembl actuel — variants natifs)',
+              backend: 'ensembl', ensemblAsm: 'F.catus_Fca126_mat1.0' }
         ],
         targetEnsemblAsm: 'F.catus_Fca126_mat1.0'
     },
@@ -167,8 +169,8 @@ async function runUCSCPipeline(species, genomeCfg, chrom, posStart, posEnd, wind
     let finalPosStart = posStart;
     let finalPosEnd   = posEnd;
 
-    // LiftOver UCSC si l'assemblage n'est pas déjà la cible
-    if (genomeCfg.ucscDb !== genomeCfg.ucscTarget) {
+    // LiftOver UCSC vers la cible (ex. canFam3 → GCF_014441545.1)
+    if (genomeCfg.ucscTarget && genomeCfg.ucscDb !== genomeCfg.ucscTarget) {
         setLoadingMsg('LiftOver UCSC en cours…');
         const lifted  = await ucscLiftOver(genomeCfg.ucscDb, genomeCfg.ucscTarget, chrom, posStart);
         finalDb       = genomeCfg.ucscTarget;
@@ -197,11 +199,8 @@ async function runUCSCPipeline(species, genomeCfg, chrom, posStart, posEnd, wind
     _rawSeq = sequence;
     displaySequence(sequence, mutIdxStart, mutIdxEnd, ucscChrom, winStart1, winEnd0);
 
-    // Cibles GCF connues → variants Ensembl sur les coordonnées converties
-    const GCF_ENSEMBL_MAP = {
-        'GCF_014441545.1': 'ROS_Cfam_1.0',          // chien
-        'GCF_018350175.1': 'F.catus_Fca126_mat1.0'  // chat
-    };
+    // --- Cas 1 : cible GCF connue → variants Ensembl en coordonnées finales (chien)
+    const GCF_ENSEMBL_MAP = { 'GCF_014441545.1': 'ROS_Cfam_1.0' };
     if (finalDb in GCF_ENSEMBL_MAP) {
         setLoadingMsg('Récupération des variants Ensembl…');
         const variants = await ensemblVariants(species.ensemblSpecies, baseChrom, winStart1, winEnd0);
@@ -210,12 +209,46 @@ async function runUCSCPipeline(species, genomeCfg, chrom, posStart, posEnd, wind
             buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
         _maskedSeq = masked.join('');
         displayMaskedSequence(masked, variants, mStart, mEnd, ucscChrom, winStart1, winEnd0);
+
+    // --- Cas 2 : liftover de la fenêtre vers un DB de variants, puis remappage
+    } else if (genomeCfg.variantChainDb) {
+        try {
+            setLoadingMsg('Liftover de la fenêtre pour les variants…');
+            const liftedWin = await ucscLiftOver(
+                genomeCfg.ucscDb, genomeCfg.variantChainDb, ucscChrom, winStart1);
+            const varChrom    = resolveChromName(genomeCfg.variantChainDb, liftedWin.chrom);
+            const varWinStart = liftedWin.position;
+            const varWinEnd   = varWinStart + (winEnd0 - winStart1);
+            const offset      = winStart1 - varWinStart; // felCat9Pos = fca126Pos + offset
+
+            setLoadingMsg('Récupération des variants Ensembl…');
+            const rawVariants = await ensemblVariants(
+                species.ensemblSpecies, varChrom, varWinStart, varWinEnd);
+
+            // Remapper toutes les positions vers l'assemblage source
+            const variants = rawVariants.map(v => ({
+                ...v,
+                start:           v.start + offset,
+                end:             v.end !== undefined ? v.end + offset : undefined,
+                seq_region_name: ucscChrom.replace(/^chr/i, '')
+            }));
+
+            displayVariants(variants);
+            const { tokens: masked, mutIdxStart: mStart, mutIdxEnd: mEnd } =
+                buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
+            _maskedSeq = masked.join('');
+            displayMaskedSequence(masked, variants, mStart, mEnd, ucscChrom, winStart1, winEnd0);
+        } catch {
+            _maskedSeq = '';
+            showVariantUnavailable(genomeCfg.id, species.targetEnsemblAsm);
+        }
+
     } else {
         _maskedSeq = '';
         showVariantUnavailable(genomeCfg.id, species.targetEnsemblAsm);
     }
 
-    // Position canFam3
+    // Position canFam3 (chien uniquement)
     if (species.ensemblSpecies === 'canis_lupus_familiaris') {
         if (genomeCfg.ucscDb === 'canFam3') {
             displayCanFam3Position(chrom, posStart, posEnd);
