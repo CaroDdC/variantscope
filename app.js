@@ -31,14 +31,14 @@ const SPECIES_CONFIG = {
         label:          'Chat (Felis catus)',
         ensemblSpecies: 'felis_catus',
         genomes: [
-            // Séquence + variants EVA natifs (coordonnées felCat9)
-            { id: 'felCat9', label: 'felCat9 / Felis_catus_9.0 (variants EVA natifs)',
+            // felCat9 = assemblage cible : séquence + variants EVA natifs
+            { id: 'felCat9', label: 'felCat9 / Felis_catus_9.0',
               backend: 'ucsc', ucscDb: 'felCat9', variantTrack: 'evaSnp8' },
-            { id: 'felCat8', label: 'felCat8 / Felis_catus_8.0 (variants EVA natifs)',
-              backend: 'ucsc', ucscDb: 'felCat8', variantTrack: 'evaSnp8' },
-            // Fca126 direct (variants natifs Ensembl)
+            { id: 'felCat8', label: 'felCat8 / Felis_catus_8.0 → liftover felCat9',
+              backend: 'ucsc', ucscDb: 'felCat8', ucscTarget: 'felCat9', variantTrack: 'evaSnp8' },
+            // Fca126 : liftover felCat9 non disponible → assemblage Ensembl natif
             { id: 'F.catus_Fca126_mat1.0',
-              label: 'F.catus_Fca126_mat1.0 (Ensembl actuel — variants natifs)',
+              label: 'F.catus_Fca126_mat1.0 (Ensembl — variants Ensembl, pas de liftover felCat9)',
               backend: 'ensembl', ensemblAsm: 'F.catus_Fca126_mat1.0' }
         ],
         targetEnsemblAsm: 'F.catus_Fca126_mat1.0'
@@ -210,11 +210,11 @@ async function runUCSCPipeline(species, genomeCfg, chrom, posStart, posEnd, wind
         _maskedSeq = masked.join('');
         displayMaskedSequence(masked, variants, mStart, mEnd, ucscChrom, winStart1, winEnd0);
 
-    // --- Cas 2 : variants natifs UCSC (EVA SNP track felCat9/8)
+    // --- Cas 2 : variants natifs UCSC (EVA SNP track) — toujours sur finalDb (felCat9)
     } else if (genomeCfg.variantTrack) {
         setLoadingMsg('Récupération des variants EVA…');
         const variants = await ucscVariants(
-            genomeCfg.ucscDb, genomeCfg.variantTrack, ucscChrom, winStart0, winEnd0);
+            finalDb, genomeCfg.variantTrack, ucscChrom, winStart0, winEnd0);
         displayVariants(variants);
         const { tokens: masked, mutIdxStart: mStart, mutIdxEnd: mEnd } =
             buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
