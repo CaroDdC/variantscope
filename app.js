@@ -31,12 +31,12 @@ const SPECIES_CONFIG = {
         label:          'Chat (Felis catus)',
         ensemblSpecies: 'felis_catus',
         genomes: [
-            // Séquence felCat9 + variants Ensembl remappés depuis Fca126
-            { id: 'felCat9', label: 'felCat9 / Felis_catus_9.0',
-              backend: 'ucsc', ucscDb: 'felCat9', variantChainDb: 'GCF_018350175.1' },
-            { id: 'felCat8', label: 'felCat8 / Felis_catus_8.0',
-              backend: 'ucsc', ucscDb: 'felCat8', variantChainDb: 'GCF_018350175.1' },
-            // Fca126 direct (pas de liftover, variants natifs Ensembl)
+            // Séquence + variants EVA natifs (coordonnées felCat9)
+            { id: 'felCat9', label: 'felCat9 / Felis_catus_9.0 (variants EVA natifs)',
+              backend: 'ucsc', ucscDb: 'felCat9', variantTrack: 'evaSnp8' },
+            { id: 'felCat8', label: 'felCat8 / Felis_catus_8.0 (variants EVA natifs)',
+              backend: 'ucsc', ucscDb: 'felCat8', variantTrack: 'evaSnp8' },
+            // Fca126 direct (variants natifs Ensembl)
             { id: 'F.catus_Fca126_mat1.0',
               label: 'F.catus_Fca126_mat1.0 (Ensembl actuel — variants natifs)',
               backend: 'ensembl', ensemblAsm: 'F.catus_Fca126_mat1.0' }
@@ -210,38 +210,16 @@ async function runUCSCPipeline(species, genomeCfg, chrom, posStart, posEnd, wind
         _maskedSeq = masked.join('');
         displayMaskedSequence(masked, variants, mStart, mEnd, ucscChrom, winStart1, winEnd0);
 
-    // --- Cas 2 : liftover de la fenêtre vers un DB de variants, puis remappage
-    } else if (genomeCfg.variantChainDb) {
-        try {
-            setLoadingMsg('Liftover de la fenêtre pour les variants…');
-            const liftedWin = await ucscLiftOver(
-                genomeCfg.ucscDb, genomeCfg.variantChainDb, ucscChrom, winStart1);
-            const varChrom    = resolveChromName(genomeCfg.variantChainDb, liftedWin.chrom);
-            const varWinStart = liftedWin.position;
-            const varWinEnd   = varWinStart + (winEnd0 - winStart1);
-            const offset      = winStart1 - varWinStart; // felCat9Pos = fca126Pos + offset
-
-            setLoadingMsg('Récupération des variants Ensembl…');
-            const rawVariants = await ensemblVariants(
-                species.ensemblSpecies, varChrom, varWinStart, varWinEnd);
-
-            // Remapper toutes les positions vers l'assemblage source
-            const variants = rawVariants.map(v => ({
-                ...v,
-                start:           v.start + offset,
-                end:             v.end !== undefined ? v.end + offset : undefined,
-                seq_region_name: ucscChrom.replace(/^chr/i, '')
-            }));
-
-            displayVariants(variants);
-            const { tokens: masked, mutIdxStart: mStart, mutIdxEnd: mEnd } =
-                buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
-            _maskedSeq = masked.join('');
-            displayMaskedSequence(masked, variants, mStart, mEnd, ucscChrom, winStart1, winEnd0);
-        } catch {
-            _maskedSeq = '';
-            showVariantUnavailable(genomeCfg.id, species.targetEnsemblAsm);
-        }
+    // --- Cas 2 : variants natifs UCSC (EVA SNP track felCat9/8)
+    } else if (genomeCfg.variantTrack) {
+        setLoadingMsg('Récupération des variants EVA…');
+        const variants = await ucscVariants(
+            genomeCfg.ucscDb, genomeCfg.variantTrack, ucscChrom, winStart0, winEnd0);
+        displayVariants(variants);
+        const { tokens: masked, mutIdxStart: mStart, mutIdxEnd: mEnd } =
+            buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
+        _maskedSeq = masked.join('');
+        displayMaskedSequence(masked, variants, mStart, mEnd, ucscChrom, winStart1, winEnd0);
 
     } else {
         _maskedSeq = '';
@@ -360,6 +338,28 @@ async function ucscLiftOver(fromDb, toDb, chrom, position) {
     try { localStorage.setItem(cacheKey, JSON.stringify(result)); } catch {}
 
     return result;
+}
+
+async function ucscVariants(db, track, chrom, start0, end0) {
+    const url = `https://api.genome.ucsc.edu/getData/track` +
+                `?genome=${db}&track=${track}` +
+                `&chrom=${encodeURIComponent(chrom)}&start=${start0}&end=${end0}`;
+    const resp = await fetch(url);
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    const items = data[track];
+    if (!Array.isArray(items)) return [];
+
+    // Convertir format UCSC EVA → format interne (compatible Ensembl)
+    return items.map(v => ({
+        id:               v.name,
+        variation_name:   v.name,
+        start:            v.chromStart + 1,   // 0-based → 1-based
+        end:              v.chromEnd,          // 0-based end = 1-based end (insertion si end < start)
+        alleles:          [v.ref || '-', v.alt || '-'],
+        consequence_type: v.ucscClass || v.varClass || '–',
+        seq_region_name:  v.chrom.replace(/^chr/i, '')
+    }));
 }
 
 async function ucscSequence(db, chrom, start0, end0) {
