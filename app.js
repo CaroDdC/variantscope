@@ -203,7 +203,8 @@ async function runUCSCPipeline(species, genomeCfg, chrom, posStart, posEnd, wind
     const GCF_ENSEMBL_MAP = { 'GCF_014441545.1': 'ROS_Cfam_1.0' };
     if (finalDb in GCF_ENSEMBL_MAP) {
         setLoadingMsg('Récupération des variants Ensembl…');
-        const variants = await ensemblVariants(species.ensemblSpecies, baseChrom, winStart1, winEnd0);
+        const ensChrom = baseChrom.replace(/^chr/i, '');  // Ensembl n'accepte pas le préfixe "chr"
+        const variants = await ensemblVariants(species.ensemblSpecies, ensChrom, winStart1, winEnd0);
         displayVariants(variants);
         const { tokens: masked, mutIdxStart: mStart, mutIdxEnd: mEnd } =
             buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
