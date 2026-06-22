@@ -329,6 +329,72 @@ footer {
     letter-spacing: .02em;
 }
 
+/* ===== Batch processing ===== */
+.batch-controls {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+.batch-file-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: .5rem 1rem;
+    font-size: .9rem;
+    cursor: pointer;
+    color: var(--text);
+    transition: border-color .15s;
+    white-space: nowrap;
+}
+.batch-file-btn:hover { border-color: var(--primary); color: var(--primary); }
+.batch-filename {
+    font-size: .88rem;
+    color: var(--text-muted);
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.batch-run-btn {
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: .5rem 1.25rem;
+    font-size: .9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s;
+    white-space: nowrap;
+}
+.batch-run-btn:hover    { background: var(--primary-dark); }
+.batch-run-btn:disabled { opacity: .5; cursor: not-allowed; }
+.progress-bar-wrapper {
+    width: 100%;
+    height: 8px;
+    background: var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+}
+.progress-bar {
+    height: 100%;
+    width: 0%;
+    background: var(--primary);
+    border-radius: 4px;
+    transition: width .25s ease;
+}
+.batch-error-item {
+    padding: .4rem .75rem;
+    border-left: 3px solid var(--mut-color);
+    margin-bottom: .4rem;
+    font-size: .82rem;
+    color: #b91c1c;
+    background: var(--err-bg);
+    border-radius: 0 6px 6px 0;
+}
+
 /* ===== Utility ===== */
 .hidden { display: none !important; }
 
