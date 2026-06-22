@@ -839,10 +839,9 @@ async function runBatch() {
             try {
                 const { tokens, sequence } = await batchComputeMasked(genomeStr, chromStr, posStart, posEnd);
                 const maskedStr = tokens.join('');
-                // Remplacer le label [?] par [REF/ALT] issu des colonnes F/G si disponible
-                const label = (ref && alt) ? `[${ref}/${alt}]` : null;
-                const finalStr = label
-                    ? maskedStr.replace(/\[[^\]]+\]/, label)
+                // Garder le REF de la séquence, remplacer uniquement le VAR par la colonne G
+                const finalStr = alt
+                    ? maskedStr.replace(/\[([^\]\/]+)\/[^\]]*\]/, `[$1/${alt}]`)
                     : maskedStr;
                 const row = ws.getRow(rowNum);
                 row.getCell(11).value = buildBatchRichText(finalStr);
