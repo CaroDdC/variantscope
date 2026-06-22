@@ -49,6 +49,31 @@
         </form>
     </section>
 
+    <!-- Traitement par lots -->
+    <section class="form-card" id="batchSection">
+        <h2>Traitement par lots (fichier xlsx)</h2>
+        <p class="note" style="margin-bottom:1rem;">
+            Format attendu : génome en colonne A, chromosome en C, position début en D, position fin en E (= D pour les SNP/insertions), ref en F, alt en G.
+            La colonne K sera remplie avec la séquence masquée (200 pb de chaque côté) — texte en noir, <span style="color:#dc2626;font-weight:600;">[REF/VAR]</span> en rouge.
+        </p>
+        <div class="batch-controls">
+            <button type="button" class="batch-file-btn" onclick="document.getElementById('batchFile').click()">📂 Choisir un fichier xlsx</button>
+            <input type="file" id="batchFile" accept=".xlsx" style="display:none">
+            <span id="batchFileName" class="batch-filename">Aucun fichier sélectionné</span>
+            <button type="button" id="batchRunBtn" class="batch-run-btn" onclick="runBatch()" disabled>▶ Lancer</button>
+        </div>
+        <div id="batchProgress" class="hidden" style="margin-top:1rem;">
+            <div class="progress-bar-wrapper">
+                <div id="batchProgressBar" class="progress-bar"></div>
+            </div>
+            <p id="batchProgressMsg" class="note" style="margin-top:.4rem;"></p>
+        </div>
+        <div id="batchErrors" class="hidden" style="margin-top:.75rem;"></div>
+        <div id="batchDownload" class="hidden" style="margin-top:.75rem;">
+            <button type="button" onclick="downloadBatch()" class="batch-run-btn">⬇ Télécharger le résultat xlsx</button>
+        </div>
+    </section>
+
     <!-- Erreur -->
     <div id="errorBox" class="error-box hidden"></div>
 
@@ -120,6 +145,7 @@
     </p>
 </footer>
 
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
