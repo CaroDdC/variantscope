@@ -735,6 +735,267 @@ function fmt(n) {
 }
 
 // =============================================================
+//  Traitement par lots
+// =============================================================
+
+// Correspondance noms de génome (colonne A du xlsx) → species/genomeId VariantScope
+const GENOME_ALIAS = {
+    'canfam3.1':             { species: 'dog',   genomeId: 'canFam3' },
+    'canfam3':               { species: 'dog',   genomeId: 'canFam3' },
+    'canfam4':               { species: 'dog',   genomeId: 'canFam4' },
+    'canfam5':               { species: 'dog',   genomeId: 'canFam5' },
+    'canfam6':               { species: 'dog',   genomeId: 'canFam6' },
+    'ros_cfam_1.0':          { species: 'dog',   genomeId: 'ROS_Cfam_1.0' },
+    'felcat9':               { species: 'cat',   genomeId: 'felCat9' },
+    'felis_catus_9.0':       { species: 'cat',   genomeId: 'felCat9' },
+    'felcat8':               { species: 'cat',   genomeId: 'felCat8' },
+    'felis_catus_8.0':       { species: 'cat',   genomeId: 'felCat8' },
+    'f.catus_fca126_mat1.0': { species: 'cat',   genomeId: 'F.catus_Fca126_mat1.0' },
+    'equcab3.0':             { species: 'horse', genomeId: 'EquCab3.0' },
+    'equcab3':               { species: 'horse', genomeId: 'EquCab3.0' },
+    'equcab2.0':             { species: 'horse', genomeId: 'EquCab2.0' },
+    'equcab2':               { species: 'horse', genomeId: 'EquCab2.0' },
+};
+
+let _batchOutputBuffer = null;
+
+document.getElementById('batchFile').addEventListener('change', function () {
+    const file = this.files[0];
+    if (file) {
+        document.getElementById('batchFileName').textContent = file.name;
+        document.getElementById('batchRunBtn').disabled = false;
+        _batchOutputBuffer = null;
+        hideEl('batchDownload');
+        hideEl('batchErrors');
+        hideEl('batchProgress');
+    }
+});
+
+async function runBatch() {
+    const file = document.getElementById('batchFile').files[0];
+    if (!file) return;
+
+    document.getElementById('batchRunBtn').disabled = true;
+    document.getElementById('batchErrors').innerHTML = '';
+    hideEl('batchErrors');
+    hideEl('batchDownload');
+    showEl('batchProgress');
+    const bar = document.getElementById('batchProgressBar');
+    const msg = document.getElementById('batchProgressMsg');
+    bar.style.width = '0%';
+    bar.style.background = 'var(--primary)';
+    msg.textContent = 'Chargement du fichier…';
+
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(arrayBuffer);
+        const ws = workbook.worksheets[0];
+
+        // Collecter les lignes de données (col A = génome reconnu)
+        const dataRows = [];
+        ws.eachRow((row, rowNum) => {
+            if (rowNum < 8) return;
+            const genomeRaw = row.getCell(1).value;
+            if (!genomeRaw || typeof genomeRaw !== 'string') return;
+            if (!GENOME_ALIAS[genomeRaw.toLowerCase().trim()]) return;
+            const chromRaw = row.getCell(3).value;
+            const startRaw = row.getCell(4).value;
+            const endRaw   = row.getCell(5).value;
+            const refRaw   = row.getCell(6).value;
+            const altRaw   = row.getCell(7).value;
+            const posStart = parseInt(startRaw, 10);
+            const posEnd   = parseInt(endRaw, 10) || posStart;
+            if (!chromRaw || isNaN(posStart)) return;
+            dataRows.push({
+                rowNum,
+                genomeStr: genomeRaw.trim(),
+                chromStr:  String(chromRaw).trim(),
+                posStart,
+                posEnd,
+                ref: refRaw ? String(refRaw).trim() : null,
+                alt: altRaw ? String(altRaw).trim() : null,
+            });
+        });
+
+        if (dataRows.length === 0) {
+            throw new Error('Aucune ligne reconnue. Vérifiez que la colonne A contient un génome connu (ex : CanFam3.1).');
+        }
+
+        const errors = [];
+        const t0 = Date.now();
+
+        for (let i = 0; i < dataRows.length; i++) {
+            const { rowNum, genomeStr, chromStr, posStart, posEnd, ref, alt } = dataRows[i];
+
+            // Estimation temps restant
+            const elapsed = (Date.now() - t0) / 1000;
+            const avgSec  = i > 0 ? elapsed / i : 0;
+            const remain  = i > 0 ? Math.round(avgSec * (dataRows.length - i)) : '…';
+            msg.textContent = `Traitement ${i + 1} / ${dataRows.length} (ligne ${rowNum})${i > 0 ? ` — ~${remain}s restantes` : ''}`;
+            bar.style.width = `${Math.round(((i) / dataRows.length) * 100)}%`;
+
+            try {
+                const tokens = await batchComputeMasked(genomeStr, chromStr, posStart, posEnd);
+                const maskedStr = tokens.join('');
+                // Remplacer le label [?] par [REF/ALT] issu des colonnes F/G si disponible
+                const label = (ref && alt) ? `[${ref}/${alt}]` : null;
+                const finalStr = label
+                    ? maskedStr.replace(/\[[^\]]+\]/, label)
+                    : maskedStr;
+                ws.getRow(rowNum).getCell(11).value = buildBatchRichText(finalStr);
+            } catch (e) {
+                const marker = ws.getRow(rowNum).getCell(2).value || `ligne ${rowNum}`;
+                errors.push({ rowNum, marker, error: e.message });
+            }
+
+            await new Promise(r => setTimeout(r, 300));
+        }
+
+        _batchOutputBuffer = await workbook.xlsx.writeBuffer();
+
+        bar.style.width = '100%';
+        msg.textContent = `Terminé — ${dataRows.length - errors.length} / ${dataRows.length} lignes traitées avec succès.`;
+        showEl('batchDownload');
+
+        if (errors.length > 0) {
+            const html = `<p style="font-size:.83rem;font-weight:600;color:#b91c1c;margin-bottom:.5rem;">${errors.length} erreur(s) :</p>` +
+                errors.map(e =>
+                    `<div class="batch-error-item"><strong>${e.marker}</strong> (ligne ${e.rowNum}) — ${e.error}</div>`
+                ).join('');
+            document.getElementById('batchErrors').innerHTML = html;
+            showEl('batchErrors');
+        }
+
+    } catch (e) {
+        bar.style.width = '100%';
+        bar.style.background = 'var(--mut-color)';
+        msg.textContent = '⚠ ' + e.message;
+    } finally {
+        document.getElementById('batchRunBtn').disabled = false;
+    }
+}
+
+function downloadBatch() {
+    if (!_batchOutputBuffer) return;
+    const blob = new Blob([_batchOutputBuffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'VariantScope_batch_output.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+// Construit un objet richText ExcelJS : texte noir + [REF/VAR] en rouge
+function buildBatchRichText(fullStr) {
+    const match = fullStr.match(/\[[^\]]+\]/);
+    if (!match) return { richText: [{ text: fullStr, font: { color: { argb: 'FF000000' } } }] };
+    const before  = fullStr.slice(0, match.index);
+    const bracket = match[0];
+    const after   = fullStr.slice(match.index + bracket.length);
+    const richText = [];
+    if (before)  richText.push({ text: before,  font: { color: { argb: 'FF000000' } } });
+    richText.push(              { text: bracket, font: { color: { argb: 'FFFF0000' } } });
+    if (after)   richText.push({ text: after,   font: { color: { argb: 'FF000000' } } });
+    return { richText };
+}
+
+// Point d'entrée batch : résout le génome et délègue au pipeline approprié
+async function batchComputeMasked(genomeStr, chromStr, posStart, posEnd) {
+    const key     = genomeStr.toLowerCase().trim();
+    const mapping = GENOME_ALIAS[key];
+    if (!mapping) throw new Error(`Génome non reconnu : "${genomeStr}"`);
+
+    const species   = SPECIES_CONFIG[mapping.species];
+    const genomeCfg = species.genomes.find(g => g.id === mapping.genomeId);
+    if (!genomeCfg) throw new Error(`Configuration introuvable pour ${mapping.genomeId}`);
+
+    if (genomeCfg.backend === 'ucsc') {
+        return await batchUCSCMasked(species, genomeCfg, chromStr, posStart, posEnd, 200);
+    } else {
+        return await batchEnsemblMasked(species, genomeCfg, chromStr, posStart, posEnd, 200);
+    }
+}
+
+// Pipeline UCSC sans DOM — même logique que runUCSCPipeline, retourne tokens[]
+async function batchUCSCMasked(species, genomeCfg, chrom, posStart, posEnd, windowSize) {
+    // Normaliser le préfixe chr (CHR34 → chr34, 34 → chr34)
+    chrom = 'chr' + chrom.replace(/^chr/i, '');
+
+    let finalDb       = genomeCfg.ucscDb;
+    let finalChrom    = chrom;
+    let finalPosStart = posStart;
+    let finalPosEnd   = posEnd;
+
+    if (genomeCfg.ucscTarget && genomeCfg.ucscDb !== genomeCfg.ucscTarget) {
+        const lifted  = await ucscLiftOver(genomeCfg.ucscDb, genomeCfg.ucscTarget, chrom, posStart);
+        finalDb       = genomeCfg.ucscTarget;
+        finalChrom    = lifted.chrom;
+        finalPosStart = lifted.position;
+        finalPosEnd   = lifted.position + (posEnd - posStart);
+    }
+
+    const baseChrom = resolveChromName(finalDb, finalChrom);
+    const ucscChrom = /^NC_/.test(finalChrom) ? 'chr' + baseChrom : finalChrom;
+
+    const midPos      = Math.round((finalPosStart + finalPosEnd) / 2);
+    const winStart0   = Math.max(0, midPos - 1 - windowSize);
+    const winEnd0     = midPos + windowSize;
+    const winStart1   = winStart0 + 1;
+    const mutIdxStart = finalPosStart - 1 - winStart0;
+    const mutIdxEnd   = finalPosEnd   - 1 - winStart0;
+
+    const sequence = await ucscSequence(finalDb, ucscChrom, winStart0, winEnd0);
+
+    let variants = [];
+    const GCF_ENSEMBL_MAP = { 'GCF_014441545.1': 'ROS_Cfam_1.0' };
+    if (finalDb in GCF_ENSEMBL_MAP) {
+        const ensChrom = baseChrom.replace(/^chr/i, '');
+        variants = await ensemblVariants(species.ensemblSpecies, ensChrom, winStart1, winEnd0);
+    } else if (genomeCfg.variantTrack) {
+        variants = await ucscVariants(finalDb, genomeCfg.variantTrack, ucscChrom, winStart0, winEnd0);
+    }
+
+    const { tokens } = buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
+    return tokens;
+}
+
+// Pipeline Ensembl sans DOM — même logique que runEnsemblPipeline, retourne tokens[]
+async function batchEnsemblMasked(species, genomeCfg, chrom, posStart, posEnd, windowSize) {
+    let chromEns    = chrom.replace(/^chr/i, '');
+    let finalChrom  = chromEns;
+    let finalPosStart = posStart;
+    let finalPosEnd   = posEnd;
+
+    if (genomeCfg.ensemblAsm !== species.targetEnsemblAsm) {
+        const lifted = await ensemblLiftOver(
+            species.ensemblSpecies, genomeCfg.ensemblAsm,
+            species.targetEnsemblAsm, chromEns, posStart
+        );
+        finalChrom    = lifted.chrom;
+        finalPosStart = lifted.position;
+        finalPosEnd   = lifted.position + (posEnd - posStart);
+    }
+
+    const midPos      = Math.round((finalPosStart + finalPosEnd) / 2);
+    const winStart1   = Math.max(1, midPos - windowSize);
+    const winEnd1     = midPos + windowSize;
+    const mutIdxStart = finalPosStart - winStart1;
+    const mutIdxEnd   = finalPosEnd   - winStart1;
+
+    const sequence = await ensemblSequence(species.ensemblSpecies, finalChrom, winStart1, winEnd1);
+    const variants = await ensemblVariants(species.ensemblSpecies, finalChrom, winStart1, winEnd1);
+
+    const { tokens } = buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
+    return tokens;
+}
+
+// =============================================================
 //  Démarrage
 // =============================================================
 initForm();
