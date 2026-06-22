@@ -743,6 +743,7 @@ const GENOME_ALIAS = {
     'canfam3.1':             { species: 'dog',   genomeId: 'canFam3' },
     'canfam3':               { species: 'dog',   genomeId: 'canFam3' },
     'canfam4':               { species: 'dog',   genomeId: 'canFam4' },
+    'uu_cfam_gsd_1.0':       { species: 'dog',   genomeId: 'canFam4' },
     'canfam5':               { species: 'dog',   genomeId: 'canFam5' },
     'canfam6':               { species: 'dog',   genomeId: 'canFam6' },
     'ros_cfam_1.0':          { species: 'dog',   genomeId: 'ROS_Cfam_1.0' },
