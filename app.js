@@ -836,14 +836,18 @@ async function runBatch() {
             bar.style.width = `${Math.round(((i) / dataRows.length) * 100)}%`;
 
             try {
-                const tokens = await batchComputeMasked(genomeStr, chromStr, posStart, posEnd);
+                const { tokens, sequence } = await batchComputeMasked(genomeStr, chromStr, posStart, posEnd);
                 const maskedStr = tokens.join('');
                 // Remplacer le label [?] par [REF/ALT] issu des colonnes F/G si disponible
                 const label = (ref && alt) ? `[${ref}/${alt}]` : null;
                 const finalStr = label
                     ? maskedStr.replace(/\[[^\]]+\]/, label)
                     : maskedStr;
-                ws.getRow(rowNum).getCell(11).value = buildBatchRichText(finalStr);
+                const row = ws.getRow(rowNum);
+                row.getCell(11).value = buildBatchRichText(finalStr);
+                // Colonne N (14) : % GC de la séquence brute
+                const gcCount = (sequence.match(/[GC]/g) || []).length;
+                row.getCell(14).value = parseFloat(((gcCount / sequence.length) * 100).toFixed(1));
             } catch (e) {
                 const marker = ws.getRow(rowNum).getCell(2).value || `ligne ${rowNum}`;
                 errors.push({ rowNum, marker, error: e.message });
@@ -906,6 +910,7 @@ function buildBatchRichText(fullStr) {
 }
 
 // Point d'entrée batch : résout le génome et délègue au pipeline approprié
+// Retourne { tokens, sequence }
 async function batchComputeMasked(genomeStr, chromStr, posStart, posEnd) {
     const key     = genomeStr.toLowerCase().trim();
     const mapping = GENOME_ALIAS[key];
@@ -962,7 +967,7 @@ async function batchUCSCMasked(species, genomeCfg, chrom, posStart, posEnd, wind
     }
 
     const { tokens } = buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
-    return tokens;
+    return { tokens, sequence };
 }
 
 // Pipeline Ensembl sans DOM — même logique que runEnsemblPipeline, retourne tokens[]
@@ -992,7 +997,7 @@ async function batchEnsemblMasked(species, genomeCfg, chrom, posStart, posEnd, w
     const variants = await ensemblVariants(species.ensemblSpecies, finalChrom, winStart1, winEnd1);
 
     const { tokens } = buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
-    return tokens;
+    return { tokens, sequence };
 }
 
 // =============================================================
