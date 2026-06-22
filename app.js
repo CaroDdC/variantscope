@@ -838,11 +838,7 @@ async function runBatch() {
 
             try {
                 const { tokens, sequence } = await batchComputeMasked(genomeStr, chromStr, posStart, posEnd);
-                const maskedStr = tokens.join('');
-                // Garder le REF de la séquence, remplacer uniquement le VAR par la colonne G
-                const finalStr = alt
-                    ? maskedStr.replace(/\[([^\]\/]+)\/[^\]]*\]/, `[$1/${alt}]`)
-                    : maskedStr;
+                const finalStr = tokens.join('');
                 const row = ws.getRow(rowNum);
                 row.getCell(11).value = buildBatchRichText(finalStr);
                 // Colonne N (14) : % GC de la séquence brute
