@@ -323,36 +323,39 @@ async function runEnsemblPipeline(species, genomeCfg, chrom, posStart, posEnd, w
 // =============================================================
 
 async function ucscLiftOver(fromDb, toDb, chrom, position) {
-    // Vérifier le cache localStorage avant d'appeler Netlify
+    // Cache localStorage
     const cacheKey = `lo:${fromDb}:${toDb}:${chrom}:${position}`;
     try {
         const hit = localStorage.getItem(cacheKey);
         if (hit) return JSON.parse(hit);
     } catch {}
 
-    const start = position - 1;
-    const end   = position;
-    const url = `/api/liftover` +
-                `?fromDb=${fromDb}&toDb=${toDb}` +
-                `&chrom=${encodeURIComponent(chrom)}&start=${start}&end=${end}`;
+    // Appel direct à l'API REST UCSC (CORS supporté, évite le proxy Vercel)
+    const start0 = position - 1;  // 0-based
+    const resp = await fetch('https://api.genome.ucsc.edu/liftover', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body:    JSON.stringify({ fromDb, toDb, position: `${chrom}:${start0}-${position}` })
+    });
 
-    const resp = await fetch(url);
     if (!resp.ok) {
         let detail = '';
         try { const d = await resp.json(); detail = d.error || ''; } catch {}
         throw new Error(`LiftOver UCSC ${fromDb}→${toDb} : HTTP ${resp.status}${detail ? ' — ' + detail : ''}`);
     }
+
     const data = await resp.json();
     if (data.error) throw new Error('LiftOver UCSC : ' + data.error);
-    if (!data.mappedCoordinates || data.mappedCoordinates.length === 0) {
+
+    const coords = data.convertedCoordinates || [];
+    if (coords.length === 0) {
         throw new Error(`LiftOver UCSC : aucune correspondance pour ${chrom}:${position} (${fromDb}→${toDb}).`);
     }
 
-    const m = data.mappedCoordinates[0];
-    const result = { chrom: m.chrom, position: m.start + 1 };
+    const m = coords[0];
+    const result = { chrom: m.chrom, position: m.chromStart + 1 };
 
     try { localStorage.setItem(cacheKey, JSON.stringify(result)); } catch {}
-
     return result;
 }
 
