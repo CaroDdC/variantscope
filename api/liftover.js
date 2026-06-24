@@ -1,18 +1,49 @@
 const https = require('https');
 const zlib  = require('zlib');
 
-function liftoverWithChainFile(fromDb, toDb, chrom, pos0) {
+// Backends de téléchargement UCSC, par ordre de préférence.
+// hgdownload1 (hgdownload.soe.ucsc.edu → 128.114.119.163) est régulièrement
+// injoignable depuis les IP datacenter ; hgdownload2 est un miroir fiable.
+const CHAIN_HOSTS = [
+    'hgdownload2.soe.ucsc.edu',
+    'hgdownload.soe.ucsc.edu',
+    'hgdownload-euro.soe.ucsc.edu'
+];
+
+const HOST_IDLE_TIMEOUT = 8000;  // ms sans données → on abandonne ce backend
+
+function chainFileUrl(host, fromDb, toDb) {
     const toDbCap = toDb.charAt(0).toUpperCase() + toDb.slice(1);
-    const url = `https://hgdownload.soe.ucsc.edu/goldenPath/${fromDb}/liftOver/` +
-                `${fromDb}To${toDbCap}.over.chain.gz`;
+    return `https://${host}/goldenPath/${fromDb}/liftOver/${fromDb}To${toDbCap}.over.chain.gz`;
+}
+
+// Essaie chaque backend dans l'ordre ; passe au suivant en cas d'échec réseau/timeout.
+async function liftoverWithChainFile(fromDb, toDb, chrom, pos0) {
+    let lastErr = null;
+    for (const host of CHAIN_HOSTS) {
+        try {
+            return await liftoverFromHost(host, fromDb, toDb, chrom, pos0);
+        } catch (e) {
+            lastErr = e;
+            // 404 = fichier réellement absent sur ce miroir → tenter le suivant
+            // timeout / erreur réseau → tenter le suivant
+        }
+    }
+    throw lastErr || new Error('Aucun backend UCSC disponible');
+}
+
+function liftoverFromHost(host, fromDb, toDb, chrom, pos0) {
+    const url = chainFileUrl(host, fromDb, toDb);
 
     return new Promise((resolve, reject) => {
-        https.get(url, (res) => {
+        const req = https.get(url, (res) => {
             if (res.statusCode === 404) {
-                return reject(new Error(`Fichier chain introuvable : ${fromDb}→${toDb}. URL essayée : ${url}`));
+                res.resume();
+                return reject(new Error(`Fichier chain introuvable (${host}) : ${fromDb}→${toDb}`));
             }
             if (res.statusCode !== 200) {
-                return reject(new Error(`Téléchargement chain : HTTP ${res.statusCode}`));
+                res.resume();
+                return reject(new Error(`Téléchargement chain (${host}) : HTTP ${res.statusCode}`));
             }
 
             const gunzip = zlib.createGunzip();
@@ -77,7 +108,13 @@ function liftoverWithChainFile(fromDb, toDb, chrom, pos0) {
             gunzip.on('error', (e) => done ? resolve(result) : reject(e));
             res.on('error',    (e) => done ? resolve(result) : reject(e));
             res.on('close',    finish);
-        }).on('error', reject);
+        });
+
+        // Abandon rapide si le backend ne répond pas (laisse une chance au suivant)
+        req.setTimeout(HOST_IDLE_TIMEOUT, () => {
+            req.destroy(new Error(`Timeout backend ${host}`));
+        });
+        req.on('error', reject);
     });
 }
 
