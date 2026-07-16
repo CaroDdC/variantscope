@@ -790,18 +790,18 @@ async function runBatch() {
         await workbook.xlsx.load(arrayBuffer);
         const ws = workbook.worksheets[0];
 
-        // Collecter les lignes de données (col A = génome reconnu)
+        // Collecter les lignes de données
+        // Entrée : A = génome, B = position début, C = position fin, E = chromosome
+        // (les lignes d'en-tête sont écartées : leur colonne A n'est pas un génome connu)
         const dataRows = [];
         ws.eachRow((row, rowNum) => {
-            if (rowNum < 8) return;
+            if (rowNum < 2) return;
             const genomeRaw = row.getCell(1).value;
             if (!genomeRaw || typeof genomeRaw !== 'string') return;
             if (!GENOME_ALIAS[genomeRaw.toLowerCase().trim()]) return;
-            const chromRaw = row.getCell(3).value;
-            const startRaw = row.getCell(4).value;
-            const endRaw   = row.getCell(5).value;
-            const refRaw   = row.getCell(6).value;
-            const altRaw   = row.getCell(7).value;
+            const startRaw = row.getCell(2).value;   // B
+            const endRaw   = row.getCell(3).value;   // C
+            const chromRaw = row.getCell(5).value;   // E
             const posStart = parseInt(startRaw, 10);
             const posEnd   = parseInt(endRaw, 10) || posStart;
             if (!chromRaw || isNaN(posStart)) return;
@@ -810,9 +810,7 @@ async function runBatch() {
                 genomeStr: genomeRaw.trim(),
                 chromStr:  String(chromRaw).trim(),
                 posStart,
-                posEnd,
-                ref: refRaw ? String(refRaw).trim() : null,
-                alt: altRaw ? String(altRaw).trim() : null,
+                posEnd
             });
         });
 
@@ -824,7 +822,7 @@ async function runBatch() {
         const t0 = Date.now();
 
         for (let i = 0; i < dataRows.length; i++) {
-            const { rowNum, genomeStr, chromStr, posStart, posEnd, ref, alt } = dataRows[i];
+            const { rowNum, genomeStr, chromStr, posStart, posEnd } = dataRows[i];
 
             // Estimation temps restant
             const elapsed = (Date.now() - t0) / 1000;
@@ -834,16 +832,24 @@ async function runBatch() {
             bar.style.width = `${Math.round(((i) / dataRows.length) * 100)}%`;
 
             try {
-                const { tokens, sequence } = await batchComputeMasked(genomeStr, chromStr, posStart, posEnd);
-                const finalStr = tokens.join('');
+                const { tokens, sequence, canFam3 } =
+                    await batchComputeMasked(genomeStr, chromStr, posStart, posEnd);
                 const row = ws.getRow(rowNum);
-                row.getCell(11).value = buildBatchRichText(finalStr);
-                // Colonne N (14) : % GC de la séquence brute
+
+                // Colonne M (13) : séquence masquée, [REF/VAR] en rouge
+                row.getCell(13).value = buildBatchRichText(tokens.join(''));
+
+                // Colonne P (16) : % GC de la séquence brute
                 const gcCount = (sequence.match(/[GC]/g) || []).length;
-                row.getCell(14).value = parseFloat(((gcCount / sequence.length) * 100).toFixed(1));
+                row.getCell(16).value = parseFloat(((gcCount / sequence.length) * 100).toFixed(1));
+
+                // Colonnes F (6) et G (7) : positions canFam3 (chien uniquement)
+                if (canFam3) {
+                    row.getCell(6).value = canFam3.start;
+                    row.getCell(7).value = canFam3.end;
+                }
             } catch (e) {
-                const marker = ws.getRow(rowNum).getCell(2).value || `ligne ${rowNum}`;
-                errors.push({ rowNum, marker, error: e.message });
+                errors.push({ rowNum, marker: `${chromStr}:${posStart}`, error: e.message });
             }
 
             await new Promise(r => setTimeout(r, 300));
@@ -903,7 +909,7 @@ function buildBatchRichText(fullStr) {
 }
 
 // Point d'entrée batch : résout le génome et délègue au pipeline approprié
-// Retourne { tokens, sequence }
+// Retourne { tokens, sequence, canFam3 } — canFam3 = null hors chien / si non mappable
 async function batchComputeMasked(genomeStr, chromStr, posStart, posEnd) {
     const key     = genomeStr.toLowerCase().trim();
     const mapping = GENOME_ALIAS[key];
@@ -960,7 +966,21 @@ async function batchUCSCMasked(species, genomeCfg, chrom, posStart, posEnd, wind
     }
 
     const { tokens } = buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
-    return { tokens, sequence };
+
+    // Positions canFam3 (chien uniquement) — calculées depuis les coordonnées d'entrée
+    let canFam3 = null;
+    if (species.ensemblSpecies === 'canis_lupus_familiaris') {
+        if (genomeCfg.ucscDb === 'canFam3') {
+            canFam3 = { start: posStart, end: posEnd };   // déjà en canFam3
+        } else {
+            try {
+                const cf3 = await ucscLiftOver(genomeCfg.ucscDb, 'canFam3', chrom, posStart);
+                canFam3 = { start: cf3.position, end: cf3.position + (posEnd - posStart) };
+            } catch { canFam3 = null; }
+        }
+    }
+
+    return { tokens, sequence, canFam3 };
 }
 
 // Pipeline Ensembl sans DOM — même logique que runEnsemblPipeline, retourne tokens[]
@@ -990,7 +1010,10 @@ async function batchEnsemblMasked(species, genomeCfg, chrom, posStart, posEnd, w
     const variants = await ensemblVariants(species.ensemblSpecies, finalChrom, winStart1, winEnd1);
 
     const { tokens } = buildMaskedSeq(sequence, variants, winStart1, mutIdxStart, mutIdxEnd);
-    return { tokens, sequence };
+
+    // Pas de position canFam3 depuis un assemblage Ensembl :
+    // le chain UCSC GCF_014441545.1→canFam3 n'existe pas (404).
+    return { tokens, sequence, canFam3: null };
 }
 
 // =============================================================
