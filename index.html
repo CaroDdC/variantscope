@@ -53,8 +53,9 @@
     <section class="form-card" id="batchSection">
         <h2>Traitement par lots (fichier xlsx)</h2>
         <p class="note" style="margin-bottom:1rem;">
-            Format attendu : génome en colonne A, chromosome en C, position début en D, position fin en E (= D pour les SNP/insertions), ref en F, alt en G.
-            La colonne K sera remplie avec la séquence masquée (200 pb de chaque côté) — texte en noir, <span style="color:#dc2626;font-weight:600;">[REF/VAR]</span> en rouge.
+            <strong>Entrée</strong> : génome en colonne A, position début en B, position fin en C (= B pour les SNP/insertions), chromosome en E.<br>
+            <strong>Sortie</strong> : séquence masquée en <strong>M</strong> (200 pb de chaque côté — texte en noir, <span style="color:#dc2626;font-weight:600;">[REF/VAR]</span> en rouge),
+            positions canFam3 en <strong>F</strong> et <strong>G</strong> (chien uniquement), % GC en <strong>P</strong>.
         </p>
         <div class="batch-controls">
             <button type="button" class="batch-file-btn" onclick="document.getElementById('batchFile').click()">📂 Choisir un fichier xlsx</button>
