@@ -757,6 +757,24 @@ const GENOME_ALIAS = {
 
 let _batchOutputBuffer = null;
 
+// Extrait le texte d'une cellule ExcelJS (chaîne, nombre, texte riche, formule, lien).
+// Retourne null si la cellule est vide.
+function cellText(v) {
+    if (v === null || v === undefined) return null;
+    if (typeof v === 'string')  return v.trim() || null;
+    if (typeof v === 'number')  return String(v);
+    if (typeof v === 'object') {
+        if (Array.isArray(v.richText)) {
+            const t = v.richText.map(r => r.text || '').join('').trim();
+            return t || null;
+        }
+        if (v.result !== undefined) return cellText(v.result);   // formule
+        if (v.text   !== undefined) return cellText(v.text);     // lien hypertexte
+    }
+    const s = String(v).trim();
+    return s || null;
+}
+
 document.getElementById('batchFile').addEventListener('change', function () {
     const file = this.files[0];
     if (file) {
@@ -799,9 +817,10 @@ async function runBatch() {
             const genomeRaw = row.getCell(1).value;
             if (!genomeRaw || typeof genomeRaw !== 'string') return;
             if (!GENOME_ALIAS[genomeRaw.toLowerCase().trim()]) return;
-            const startRaw = row.getCell(2).value;   // B
-            const endRaw   = row.getCell(3).value;   // C
-            const chromRaw = row.getCell(5).value;   // E
+            const startRaw  = row.getCell(2).value;   // B
+            const endRaw    = row.getCell(3).value;   // C
+            const markerRaw = row.getCell(4).value;   // D
+            const chromRaw  = row.getCell(5).value;   // E
             const posStart = parseInt(startRaw, 10);
             const posEnd   = parseInt(endRaw, 10) || posStart;
             if (!chromRaw || isNaN(posStart)) return;
@@ -810,7 +829,8 @@ async function runBatch() {
                 genomeStr: genomeRaw.trim(),
                 chromStr:  String(chromRaw).trim(),
                 posStart,
-                posEnd
+                posEnd,
+                markerId:  cellText(markerRaw)
             });
         });
 
@@ -822,7 +842,7 @@ async function runBatch() {
         const t0 = Date.now();
 
         for (let i = 0; i < dataRows.length; i++) {
-            const { rowNum, genomeStr, chromStr, posStart, posEnd } = dataRows[i];
+            const { rowNum, genomeStr, chromStr, posStart, posEnd, markerId } = dataRows[i];
 
             // Estimation temps restant
             const elapsed = (Date.now() - t0) / 1000;
@@ -849,7 +869,8 @@ async function runBatch() {
                     row.getCell(7).value = canFam3.end;
                 }
             } catch (e) {
-                errors.push({ rowNum, marker: `${chromStr}:${posStart}`, error: e.message });
+                // Marker ID (colonne D) si renseigné, sinon chromosome:position
+                errors.push({ rowNum, marker: markerId || `${chromStr}:${posStart}`, error: e.message });
             }
 
             await new Promise(r => setTimeout(r, 300));
